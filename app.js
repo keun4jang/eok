@@ -348,14 +348,14 @@ function renderFixed() {
       <span><b>목록 붙여넣기</b></span><span class="chev">›</span>
     </button>
     <section class="card">
-      <div class="row"><h2>수입</h2><button class="btn sm ghost" data-add-fixed="income">＋ 추가</button></div>
+      <div class="row"><h2>수입 <span class="h-sum income">${won(incTotal)}</span></h2><button class="btn sm ghost" data-add-fixed="income">＋</button></div>
       ${inc.length ? `<ul class="list">${inc.map(item).join('')}</ul>` : `<div class="empty">없음</div>`}
     </section>
     <section class="card">
-      <div class="row"><h2>지출</h2><button class="btn sm ghost" data-add-fixed="expense">＋ 추가</button></div>
+      <div class="row"><h2>지출 <span class="h-sum expense">${won(sum(exp))}</span></h2><button class="btn sm ghost" data-add-fixed="expense">＋</button></div>
       ${exp.length ? `<ul class="list">${exp.map(item).join('')}</ul>` : `<div class="empty">없음</div>`}
     </section>
-    ${inst.length ? `<section class="card"><h2>할부</h2><ul class="list">${inst.map(item).join('')}</ul></section>` : ''}
+    ${inst.length ? `<section class="card"><h2>할부 <span class="h-sum expense">${won(sum(inst))}</span></h2><ul class="list">${inst.map(item).join('')}</ul></section>` : ''}
     ${ended.length ? `<section class="card"><div class="row"><h2 class="muted">끝난 할부 ${ended.length}건</h2><button class="link-btn" data-clear-ended>정리</button></div></section>` : ''}
   `;
 }
