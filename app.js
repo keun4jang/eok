@@ -373,7 +373,7 @@ function openFixedImportSheet(initialText = '') {
   fixedItems = [];
   openSheet(`<h2>목록 붙여넣기</h2>
     <div class="row" style="margin-bottom:8px">
-      <button type="button" class="btn sm ghost" data-act="clip">📋 붙여넣기</button>
+      <span><button type="button" class="btn sm ghost" data-act="clip">📋 붙여넣기</button> <button type="button" class="btn sm ghost" data-act="ai">✨ AI</button></span>
       <button type="button" class="link-btn" data-act="clear">지우기</button>
     </div>
     <textarea name="fixedText" rows="6" placeholder="| 항목명 | 월 금액 | 결제일 | 카테고리 |&#10;| 월세 | 650,000원 | 1일 | 주거/관리비 |"></textarea>
@@ -385,6 +385,13 @@ function openFixedImportSheet(initialText = '') {
   const update = () => { fixedItems = buildFixedItems(ta.value); renderFixedPreview(); submit.textContent = label(); };
   ta.addEventListener('input', update);
   form.querySelector('[data-act=clear]').onclick = () => { ta.value = ''; update(); ta.focus(); };
+  form.querySelector('[data-act=ai]').onclick = async e => {
+    if (!ta.value.trim() || !window.EokAI?.consent()) return;
+    const btn = e.target; btn.disabled = true; btn.textContent = '✨ …';
+    try { fixedItems = fixedItemsFrom(await EokAI.parseFixed(ta.value, EXPENSE_CATS, INCOME_CATS)); renderFixedPreview(); submit.textContent = label(); toast(`AI ${fixedItems.length}건`); }
+    catch (err) { toast(err.message || 'AI 실패'); }
+    finally { btn.disabled = false; btn.textContent = '✨ AI'; }
+  };
   form.querySelector('[data-act=clip]').onclick = async () => {
     try { ta.value = await navigator.clipboard.readText(); update(); }
     catch { alert('클립보드를 읽을 수 없어요. 입력칸을 길게 눌러 직접 붙여넣어 주세요.'); ta.focus(); }
@@ -405,8 +412,9 @@ function openFixedImportSheet(initialText = '') {
 }
 
 const normName = s => String(s).replace(/\s|\(.*?\)|주식회사|㈜/g, '').toLowerCase();
-function buildFixedItems(text) {
-  return SmsParser.parseFixedList(text, EXPENSE_CATS, INCOME_CATS).map(it => {
+function buildFixedItems(text) { return fixedItemsFrom(SmsParser.parseFixedList(text, EXPENSE_CATS, INCOME_CATS)); }
+function fixedItemsFrom(list) {
+  return list.map(it => {
     const dup = state.fixed.some(f => normName(f.name) === normName(it.name) || (f.type === it.type && f.amount === it.amount && String(f.day) === String(it.day)));
     const off = it.kind === 'saving' || it.kind === 'card' || (it.type === 'income' && it.amount < 1000); // 분기 이자 몇십 원 같은 수입은 기본 제외
     return { ...it, dup, on: !dup && !off };
@@ -773,7 +781,7 @@ function openSmsSheet(initialText = '') {
   smsItems = [];
   openSheet(`<h2>✉ 문자·카톡</h2>
     <div class="row" style="margin-bottom:8px">
-      <button type="button" class="btn sm ghost" data-act="clip">📋 붙여넣기</button>
+      <span><button type="button" class="btn sm ghost" data-act="clip">📋 붙여넣기</button> <button type="button" class="btn sm ghost" data-act="ai">✨ AI</button></span>
       <button type="button" class="link-btn" data-act="clear">지우기</button>
     </div>
     <textarea name="smsText" rows="5" placeholder="[Web발신]&#10;신한카드(1234)승인 홍*동 12,500원(일시불)11/15 12:34 스타벅스"></textarea>
@@ -784,6 +792,13 @@ function openSmsSheet(initialText = '') {
   const update = () => { smsItems = buildSmsItems(ta.value); renderSmsPreview(); };
   ta.addEventListener('input', update);
   form.querySelector('[data-act=clear]').onclick = () => { ta.value = ''; update(); ta.focus(); };
+  form.querySelector('[data-act=ai]').onclick = async e => {
+    if (!ta.value.trim() || !window.EokAI?.consent()) return;
+    const btn = e.target; btn.disabled = true; btn.textContent = '✨ …';
+    try { buildSmsItems.skipped = 0; smsItems = smsItemsFrom(await EokAI.parseNotifications(ta.value, EXPENSE_CATS, INCOME_CATS)); renderSmsPreview(); toast(`AI ${smsItems.length}건`); }
+    catch (err) { toast(err.message || 'AI 실패'); }
+    finally { btn.disabled = false; btn.textContent = '✨ AI'; }
+  };
   form.querySelector('[data-act=clip]').onclick = async () => {
     try { ta.value = await navigator.clipboard.readText(); update(); }
     catch { alert('클립보드를 읽을 수 없어요. 입력칸을 길게 눌러 직접 붙여넣어 주세요.'); ta.focus(); }
@@ -806,6 +821,9 @@ function openSmsSheet(initialText = '') {
 function buildSmsItems(text) {
   const { results, skipped } = SmsParser.parseNotifications(text);
   buildSmsItems.skipped = skipped;
+  return smsItemsFrom(results);
+}
+function smsItemsFrom(results) {
   return results.map(r => {
     const memo = r.merchant || (r.type === 'income' ? '입금' : '카드 결제');
     const learned = state.merchantCats?.[memo];
