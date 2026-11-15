@@ -1,7 +1,7 @@
 // 오프라인 지원 + 빠른 업데이트.
 // 네트워크 우선: 온라인이면 항상 최신 파일을 받고 캐시를 갱신, 오프라인일 때만 캐시 사용.
 // (앱을 고치면서 폰에서 바로 확인하기 위해 캐시 우선 → 네트워크 우선으로 변경)
-const CACHE = 'eok-v11';
+const CACHE = 'eok-v12';
 const ASSETS = ['./', 'index.html', 'styles.css', 'app.js', 'parser.js', 'sync-core.js', 'sync.js', 'firebase-config.js', 'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/icon-180.png'];
 
 self.addEventListener('install', e => {

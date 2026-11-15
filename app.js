@@ -1,7 +1,7 @@
 'use strict';
 
 /* ===================== 데이터 ===================== */
-const APP_VERSION = 'v11 · 2026-11-15'; // 앱을 고칠 때마다 sw.js의 CACHE와 함께 올릴 것
+const APP_VERSION = 'v12 · 2026-11-15'; // 앱을 고칠 때마다 sw.js의 CACHE와 함께 올릴 것
 const STORAGE_KEY = 'moneyplan.v1'; // 앱 이름이 '억'으로 바뀌었지만 기존 데이터 호환을 위해 키 유지
 const EXPENSE_CATS = ['식비', '카페/간식', '교통', '쇼핑', '생활용품', '주거/관리비', '통신', '구독', '보험', '문화/여가', '의료', '교육', '경조사', '대출이자', '기타'];
 const INCOME_CATS = ['급여', '부수입', '상여', '이자/배당', '용돈', '기타'];
@@ -365,7 +365,7 @@ function untilLabel(until, now) {
 let fixedItems = [];
 const KIND_LABEL = { income: '수입', expense: '지출', installment: '할부', saving: '저축/이동', card: '카드대금' };
 
-function openFixedImportSheet() {
+function openFixedImportSheet(initialText = '') {
   fixedItems = [];
   openSheet(`<h2>고정 항목 한 번에 등록</h2>
     <p class="muted" style="margin:-8px 0 10px">카드사·은행 분석 결과나 표, "넷플릭스 17,000원 매월 5일" 같은 메모를 붙여넣으세요. [고정수입]·[고정지출]·[할부] 같은 제목이 있으면 그대로 구분합니다.</p>
@@ -396,14 +396,15 @@ function openFixedImportSheet() {
     else it[f] = e.target.value;
     submit.textContent = label();
   });
+  if (initialText) { ta.value = initialText; update(); }
   submit.textContent = label();
-  setTimeout(() => ta.focus(), 50);
+  if (!initialText) setTimeout(() => ta.focus(), 50);
 }
 
 const normName = s => String(s).replace(/\s|\(.*?\)|주식회사|㈜/g, '').toLowerCase();
 function buildFixedItems(text) {
   return SmsParser.parseFixedList(text, EXPENSE_CATS, INCOME_CATS).map(it => {
-    const dup = state.fixed.some(f => normName(f.name) === normName(it.name));
+    const dup = state.fixed.some(f => normName(f.name) === normName(it.name) || (f.type === it.type && f.amount === it.amount && String(f.day) === String(it.day)));
     const off = it.kind === 'saving' || it.kind === 'card' || (it.type === 'income' && it.amount < 1000); // 분기 이자 몇십 원 같은 수입은 기본 제외
     return { ...it, dup, on: !dup && !off };
   });
@@ -970,15 +971,21 @@ function importData(file) {
 render();
 
 // 안드로이드 공유하기(Web Share Target) 또는 ?text= 링크로 들어온 결제 문자 처리
-(function handleSharedText() {
+function handleSharedText() {
   const q = new URLSearchParams(location.search);
+  // 고정 항목 목록 링크 (확인 후 등록). # 뒤에 담으면 서버(GitHub)로 전송되지 않는다.
+  const h = new URLSearchParams(location.hash.slice(1));
+  const fixedList = (h.get('fixed') || q.get('fixed') || '').trim();
   const shared = [q.get('title'), q.get('text'), q.get('url')].filter(Boolean).join('\n').trim();
-  if (!shared) return;
-  history.replaceState(null, '', location.pathname); // 새로고침 시 중복 입력 방지
+  if (!shared && !fixedList) return;
+  history.replaceState(null, '', location.pathname); // # 부분까지 지움 // 새로고침 시 중복 입력 방지
+  if (fixedList) { currentTab = 'fixed'; render(); openFixedImportSheet(fixedList); return; }
   currentTab = 'tx';
   render();
   openSmsSheet(shared);
-})();
+}
+handleSharedText();
+window.addEventListener('hashchange', handleSharedText); // 앱이 열려 있는 상태에서 링크를 열어도 처리
 if ('serviceWorker' in navigator && location.protocol !== 'file:') {
   navigator.serviceWorker.register('sw.js').then(reg => {
     window.__swReg = reg;

@@ -230,6 +230,9 @@
     for (const raw of lines) {
       let line = raw.trim();
       if (!line) continue;
+      // 섹션 안 설명문에서 공통 결제일 읽기 (예: "결제일은 매월 26일입니다") — 짧은 문장은 제목으로 오인되므로 먼저 검사
+      const sd = line.match(/결제일[은는]?\s*(매월|매달)?\s*(\d{1,2})\s*일/);
+      if (sd && !line.startsWith('|')) { sectionDay = +sd[2]; continue; }
       if (isHeading(line)) {
         const title = line.replace(/[\[\]#*:：]/g, '');
         let found = null;
@@ -240,9 +243,6 @@
         else if (/^(#{1,6}\s|\[)/.test(line)) { section = 'skip'; sectionDay = ''; }
         continue;
       }
-      // 섹션 안 설명문에서 공통 결제일 읽기 (예: "결제일은 매월 26일입니다")
-      const sd = line.match(/결제일[은는]?\s*(매월|매달)?\s*(\d{1,2})\s*일/);
-      if (sd && !line.startsWith('|')) sectionDay = +sd[2];
       if (section === 'skip') continue;
       if (/^\|?\s*:?-{2,}/.test(line)) continue; // 표 구분선
 
