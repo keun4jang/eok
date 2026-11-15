@@ -1,7 +1,7 @@
 'use strict';
 
 /* ===================== 데이터 ===================== */
-const APP_VERSION = 'v8 · 2026-11-15'; // 앱을 고칠 때마다 sw.js의 CACHE와 함께 올릴 것
+const APP_VERSION = 'v9 · 2026-11-15'; // 앱을 고칠 때마다 sw.js의 CACHE와 함께 올릴 것
 const STORAGE_KEY = 'moneyplan.v1'; // 앱 이름이 '억'으로 바뀌었지만 기존 데이터 호환을 위해 키 유지
 const EXPENSE_CATS = ['식비', '카페/간식', '교통', '쇼핑', '생활용품', '주거/관리비', '통신', '구독', '보험', '문화/여가', '의료', '교육', '경조사', '대출이자', '기타'];
 const INCOME_CATS = ['급여', '부수입', '상여', '이자/배당', '용돈', '기타'];
@@ -27,6 +27,7 @@ const defaultState = () => ({
 });
 
 let state = load();
+let snap = SyncCore.snapshot(state); // 마지막 저장 시점 스냅샷 — 저장할 때 바뀐 레코드에 수정 시각(u)을 찍는 데 사용
 let currentTab = 'home';
 let viewMonth = ym(new Date());
 let txMode = 'list';      // 'list' | 'cal'
@@ -44,8 +45,20 @@ function load() {
   }
 }
 function save() {
+  snap = SyncCore.stamp(state, snap);
+  persist();
+  window.EokSync?.schedule(); // 로그인돼 있으면 잠시 뒤 클라우드와 동기화
+}
+function persist() {
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
   catch (e) { alert('저장에 실패했습니다: ' + e.message); }
+}
+// 동기화로 합쳐진 상태를 받아들일 때(수정 시각을 다시 찍지 않음)
+function adopt(next) {
+  state = { ...defaultState(), ...next, settings: { ...defaultState().settings, ...(next.settings || {}) } };
+  snap = SyncCore.snapshot(state);
+  persist();
+  if (!sheet.open) render();
 }
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 
@@ -487,6 +500,7 @@ function renderInsights() {
   const efTarget = monthlyExp * 3;
   const efOk = monthlyExp > 0 && st.emergency >= efTarget;
   view.innerHTML = `
+    ${accountCardHtml()}
     <section class="card">
       <h2>절약 포인트</h2>
       <p class="muted">${basisText(avg)} · 기준치는 일반적인 가이드일 뿐 정답이 아닙니다.</p>
@@ -514,7 +528,7 @@ function renderInsights() {
 
     <section class="card">
       <div class="row"><h2>데이터</h2><span class="muted">억 ${APP_VERSION}</span></div>
-      <p class="muted">모든 데이터는 이 기기 브라우저에만 저장됩니다. 서버로 전송되지 않는 대신, 앱을 지우거나 브라우저 데이터를 삭제하면 사라집니다. <b>주기적으로 백업하세요.</b></p>
+      <p class="muted">데이터는 이 기기에 먼저 저장되고, 로그인하면 클라우드와 동기화됩니다. 로그인하지 않으면 이 기기에만 있으니 <b>주기적으로 백업하세요.</b></p>
       <div class="actions">
         <button class="btn ghost" id="exportBtn">백업 내보내기</button>
         <button class="btn ghost" id="importBtn">백업 불러오기</button>
@@ -524,6 +538,28 @@ function renderInsights() {
     </section>
   `;
 }
+
+function accountCardHtml() {
+  const st = window.EokSync?.status() || { phase: 'loading' };
+  const time = st.last ? new Date(st.last).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' }) : '';
+  let body;
+  if (st.phase === 'noconfig') body = `<p class="muted">클라우드 설정 전이에요. 지금은 이 기기에만 저장됩니다.</p>`;
+  else if (st.phase === 'loading') body = `<p class="muted">로그인 확인 중…</p>`;
+  else if (st.phase === 'offline') body = `<p class="muted">오프라인 — 연결되면 로그인할 수 있어요. 기록은 이 기기에 계속 저장됩니다.</p>`;
+  else if (st.phase === 'error') body = `<p class="muted">${esc(st.error)}</p>`;
+  else if (!st.user) body = `<p class="muted">로그인하면 폰을 바꾸거나 다른 기기에서도 같은 데이터를 볼 수 있어요.</p>
+      <button class="btn block" id="loginBtn">Google로 로그인</button>`;
+  else body = `<div class="row"><div><div class="title">${esc(st.user.name || '')}</div><div class="muted">${esc(st.user.email || '')}</div></div>
+      <button class="link-btn" id="logoutBtn">로그아웃</button></div>
+      <div class="row" style="margin-top:8px"><span class="muted">${st.phase === 'syncing' ? '동기화 중…' : time ? `마지막 동기화 ${time}` : '동기화 대기'}</span>
+      <button class="btn sm ghost" id="syncBtn">지금 동기화</button></div>`;
+  return `<section class="card" id="accountCard"><h2>계정</h2>${body}${st.error && st.user ? `<div class="tip warn"><b>동기화 문제</b>${esc(st.error)}</div>` : ''}</section>`;
+}
+function refreshAccount() {
+  const el = document.getElementById('accountCard');
+  if (el) el.outerHTML = accountCardHtml();
+}
+window.EokApp = { getState: () => state, adopt, refreshAccount };
 
 function buildTips(avg) {
   const tips = [];
@@ -831,7 +867,7 @@ $('#nextMonth').onclick = () => { selectedDay = null; viewMonth = shiftMonth(vie
 $('#fab').onclick = () => openTxSheet();
 
 view.addEventListener('click', e => {
-  const el = e.target.closest('[data-import-fixed],[data-clear-ended],[data-sms],[data-day],[data-clear-day],[data-edit-tx],[data-edit-fixed],[data-add-fixed],[data-edit-goal],[data-add-goal],[data-goto],#exportBtn,#importBtn,#resetBtn,#updateBtn');
+  const el = e.target.closest('[data-import-fixed],[data-clear-ended],[data-sms],[data-day],[data-clear-day],[data-edit-tx],[data-edit-fixed],[data-add-fixed],[data-edit-goal],[data-add-goal],[data-goto],#exportBtn,#importBtn,#resetBtn,#updateBtn,#loginBtn,#logoutBtn,#syncBtn');
   if (!el) return;
   if ('importFixed' in el.dataset) openFixedImportSheet();
   else if ('clearEnded' in el.dataset) {
@@ -847,6 +883,9 @@ view.addEventListener('click', e => {
   else if (el.dataset.editGoal) openGoalSheet(state.goals.find(g => g.id === el.dataset.editGoal));
   else if ('addGoal' in el.dataset) openGoalSheet();
   else if (el.dataset.goto) { currentTab = el.dataset.goto; render(); }
+  else if (el.id === 'loginBtn') window.EokSync?.login();
+  else if (el.id === 'logoutBtn') window.EokSync?.logout();
+  else if (el.id === 'syncBtn') window.EokSync?.syncNow();
   else if (el.id === 'updateBtn') {
     const reg = window.__swReg;
     if (!reg) { location.reload(); return; }
@@ -856,7 +895,7 @@ view.addEventListener('click', e => {
   else if (el.id === 'exportBtn') exportData();
   else if (el.id === 'importBtn') $('#importFile').click();
   else if (el.id === 'resetBtn') {
-    if (confirm('모든 데이터를 삭제합니다. 되돌릴 수 없어요. 계속할까요?')) { state = defaultState(); save(); render(); }
+    if (confirm(`모든 데이터를 삭제합니다. 되돌릴 수 없어요.${window.EokSync?.status().user ? '\n로그인 상태라 클라우드와 다른 기기에서도 지워집니다.' : ''}\n계속할까요?`)) { state = defaultState(); save(); render(); }
   }
 });
 view.addEventListener('change', e => {
