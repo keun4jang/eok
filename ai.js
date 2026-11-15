@@ -6,7 +6,8 @@
  * 주의: 입력 원문이 Google 서버로 전송된다(무료 등급은 Google이 서비스 개선에 쓸 수 있음).
  */
 (function (root) {
-  const MODELS = ['gemini-2.5-flash', 'gemini-2.5-flash-lite']; // 앞에서부터 시도
+  // 앞에서부터 시도. 혼잡(500/503)·한도(429)·폐기(404)면 다음 모델로. (2026-11: 2.5 계열은 신규 사용자에게 막힘)
+const MODELS = ['gemini-3.8-flash', 'gemini-flash-latest', 'gemini-flash-lite-latest'];
   let cfgPromise = null;
   const cfg = () => (cfgPromise = cfgPromise || import('./firebase-config.js').then(m => m.default));
 
@@ -19,19 +20,20 @@
         const headers = { 'Content-Type': 'application/json', 'x-goog-api-key': c.apiKey };
         const ac = await window.EokSync?.appCheckToken?.().catch(() => null);
         if (ac) headers['X-Firebase-AppCheck'] = ac; // AI Logic은 App Check가 적용돼 있어 토큰 필수
+        const ctl = new AbortController(); const timer = setTimeout(() => ctl.abort(), 45000);
         const res = await fetch(`https://firebasevertexai.googleapis.com/v1beta/projects/${c.projectId}/models/${model}:generateContent`, {
-          method: 'POST',
+          method: 'POST', signal: ctl.signal,
           headers,
           body: JSON.stringify({
             contents: [{ role: 'user', parts: [{ text: prompt }] }],
             generationConfig: { temperature: 0, responseMimeType: 'application/json', responseSchema: schema },
           }),
         });
-        const j = await res.json();
-        if (!res.ok) { lastErr = new Error(j?.error?.status === 'UNAUTHENTICATED' ? 'AI 인증(App Check) 실패' : j?.error?.status === 'PERMISSION_DENIED' ? 'AI 미설정' : (j?.error?.status === 'RESOURCE_EXHAUSTED' ? 'AI 한도 초과 · 잠시 후' : (j?.error?.message || res.status))); if (res.status === 404 || res.status === 400) continue; throw lastErr; }
+        const j = await res.json().finally(() => clearTimeout(timer));
+        if (!res.ok) { lastErr = new Error(j?.error?.status === 'UNAUTHENTICATED' ? 'AI 인증(App Check) 실패' : j?.error?.status === 'PERMISSION_DENIED' ? 'AI 미설정' : (j?.error?.status === 'RESOURCE_EXHAUSTED' ? 'AI 한도 초과 · 잠시 후' : (j?.error?.message || res.status))); if ([400, 404, 429, 500, 503].includes(res.status)) continue; throw lastErr; }
         const txt = j?.candidates?.[0]?.content?.parts?.map(p => p.text || '').join('') || '';
         return JSON.parse(txt);
-      } catch (e) { lastErr = e; if (/미설정|한도|인증/.test(e.message)) throw e; }
+      } catch (e) { lastErr = e.name === 'AbortError' ? new Error('AI 응답 지연') : e; if (/미설정|인증/.test(lastErr.message)) throw lastErr; }
     }
     throw lastErr || new Error('AI 실패');
   }
@@ -56,7 +58,7 @@
 - amount: 원 단위 정수, 월 금액. 범위·여러 금액이면 가장 최근 값.
 - day: 매월 결제·입금일(1~31), 모르면 null. 범위면 마지막 날.
 - category: 지출·할부는 [${expenseCats.join(', ')}] 중 하나, 수입은 [${incomeCats.join(', ')}] 중 하나, saving·card는 "기타".
-- until: 할부의 마지막 납부 월 "YYYY-MM"(남은 회차로 계산), 아니면 null.
+- until: 할부의 마지막 납부 월 "YYYY-MM", 아니면 null. 이번 달 결제도 남은 회차에 포함: 남은 1회면 이번 달(${today().slice(0, 7)}), 남은 2회면 다음 달. 종료일이 적혀 있으면 그 월.
 - name: 짧게. 계좌번호·괄호 메모·사람 실명은 빼고 무엇인지 알 수 있게.
 - guess: 원문이 추정이라고 했거나 확실하지 않으면 true.
 글:
@@ -101,6 +103,42 @@ ${text.slice(0, 12000)}
     }));
   }
 
+  // AI 재무 코치: 요약된 재무 상태 → 우선순위 행동 계획 (실명·계좌번호 없이 집계값만 전송)
+  async function advise(snapshot) {
+    const schema = S('OBJECT', {
+      properties: {
+        score: S('INTEGER'), summary: S('STRING'),
+        goal: S('OBJECT', { properties: { monthlyNeeded: S('INTEGER'), etaMonths: S('INTEGER', { nullable: true }), verdict: S('STRING') }, required: ['monthlyNeeded', 'verdict'] }),
+        actions: S('ARRAY', { items: S('OBJECT', {
+          properties: {
+            priority: S('INTEGER'), area: S('STRING', { enum: ['비상금', '부채', '지출', '보험', '절세', '투자', '수입', '현금흐름'] }),
+            title: S('STRING'), why: S('STRING'), how: S('STRING'), monthlyImpact: S('INTEGER', { nullable: true }),
+          },
+          required: ['priority', 'area', 'title', 'why', 'how'],
+        }) }),
+        warnings: S('ARRAY', { items: S('STRING') }),
+      },
+      required: ['score', 'summary', 'goal', 'actions', 'warnings'],
+    });
+    const prompt = `너는 한국 개인재무 분야 최고 수준의 자산관리 전문가(CFP)다. 아래 사용자 데이터만 근거로, 첫 목표(순자산 1억 등)를 가장 빨리·안전하게 달성하는 실행 계획을 짜라.
+원칙:
+- 듣기 좋은 말 금지. 숫자 근거로 직설적으로. 데이터에 없는 사실은 가정하지 말고 필요하면 "확인 필요"라고 써라.
+- 우선순위: 현금흐름 적자/결제 부족 → 고금리 부채 → 비상금(생활비 3~6개월, 바로 꺼낼 수 있는 곳) → 새는 고정지출(보험·통신·구독·할부) → 절세 계좌 → 투자 효율.
+- 한국 제도를 구체적으로 활용: ISA(중개형, 비과세 한도·분리과세), 연금저축·IRP 세액공제, 청년 정책 상품, 국내상장 해외ETF vs 해외 직접투자의 과세·환전 차이, 증권사별 수수료·환전 우대, 정기 매수 위치(어느 계좌·어느 증권사에서 사는 게 유리한지).
+- 투자 목록이 있으면 종목 중복(같은 지수 반복), 커버드콜 등 성장기에 불리할 수 있는 상품, 너무 잘게 쪼갠 정기매수를 점검하고 통합안을 제시.
+- 보험료가 소득 대비 높으면 중복 보장 점검을 권하되 해지 판단은 보장 확인 후로.
+- 세율·한도·상품 조건은 바뀔 수 있으니 수치가 불확실하면 "최신 조건 확인"을 덧붙여라.
+- 특정 종목의 단기 등락 예측 금지.
+출력:
+- score: 0~100 재무 건강 점수, summary: 2~3문장.
+- goal: 목표 달성에 필요한 월 저축·투자액, 현재 페이스 기준 예상 개월수(계산 불가면 null), verdict 한 줄.
+- actions: 우선순위 순 5~8개. title은 15자 이내, why는 데이터 근거 1~2문장, how는 구체적 실행 방법(어디서·얼마·언제), monthlyImpact는 월 개선 금액(원, 추정 가능할 때만).
+- warnings: 위험 신호 0~4개.
+사용자 데이터(JSON, 금액 원):
+${JSON.stringify(snapshot)}`;
+    return call(prompt, schema);
+  }
+
   // 처음 한 번만 전송 동의
   function consent() {
     try { if (localStorage.getItem('eok.aiOk') === '1') return true; } catch {}
@@ -109,5 +147,5 @@ ${text.slice(0, 12000)}
     return ok;
   }
 
-  root.EokAI = { parseFixed, parseNotifications, consent };
+  root.EokAI = { parseFixed, parseNotifications, advise, consent };
 })(window);

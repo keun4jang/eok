@@ -365,3 +365,14 @@ details.tip > div { margin-top: 6px; font-size: 13px; color: var(--muted); }
 .bh i { display: block; width: 70%; min-height: 2px; border-radius: 3px 3px 0 0; background: linear-gradient(180deg, var(--gold-hi), var(--gold)); }
 .bh.empty i { background: var(--line); }
 .bh span { font-size: 10px; color: var(--muted); }
+
+/* ---------- AI 코치 ---------- */
+.coach-top { display: flex; gap: 14px; align-items: center; margin: 4px 0 10px; }
+.coach-top p { margin: 0; font-size: 14px; }
+.score { flex: none; width: 64px; height: 64px; border-radius: 50%; display: grid; place-items: center;
+  background: conic-gradient(var(--gold) calc(var(--p) * 1%), var(--surface-2) 0); position: relative; }
+.score::before { content: ''; position: absolute; inset: 6px; border-radius: 50%; background: var(--surface); }
+.score b { position: relative; font-size: 20px; }
+details.act summary { align-items: center; }
+details.act > div { margin-top: 6px; }
+details.act > div b { color: var(--text); margin-right: 4px; }

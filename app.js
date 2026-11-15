@@ -91,20 +91,23 @@ const parseAmount = v => Math.max(0, Number(String(v).replace(/[^\d.]/g, '')) ||
 const monthLabel = m => { const [y, mo] = m.split('-'); return `${y}년 ${Number(mo)}월`; };
 
 /* ===================== 계산 ===================== */
+// 실제 기록 월: 과거 달을 '월 합계'(수입 포함)로 통째로 넣은 달. 이 달은 고정 항목·공과금 추정을 쓰지 않는다(이중 계산 방지).
+const isActualMonth = m => state.tx.some(t => t.sum && t.type === 'income' && t.date.startsWith(m));
 function monthStats(m) {
   const txs = state.tx.filter(t => t.date.startsWith(m));
+  const actual = isActualMonth(m);
   const varIncome = sum(txs.filter(t => t.type === 'income'));
   const varExpense = sum(txs.filter(t => t.type === 'expense'));
-  const fx = activeFixed(m);
+  const fx = actual ? [] : activeFixed(m);
   const fixedIncome = sum(fx.filter(f => f.type === 'income'));
-  const fixedExpense = sum(fx.filter(f => f.type === 'expense')) + billsTotal(m);
-  const saving = sum(fx.filter(f => f.type === 'saving'));
-  const bills = billsTotal(m); // 공과금(월별 기록·추정)은 고정지출에 포함 // 고정 투자·저축: 지출 아님, 남는 돈에서만 뺌
+  const fixedExpense = sum(fx.filter(f => f.type === 'expense')) + (actual ? 0 : billsTotal(m));
+  const saving = sum(fx.filter(f => f.type === 'saving')) + sum(txs.filter(t => t.type === 'saving'));
+  const bills = actual ? 0 : billsTotal(m); // 공과금(월별 기록·추정)은 고정지출에 포함 // 고정 투자·저축: 지출 아님, 남는 돈에서만 뺌
   const byCat = {};
   txs.filter(t => t.type === 'expense').forEach(t => { byCat[t.category] = (byCat[t.category] || 0) + t.amount; });
   const income = varIncome + fixedIncome;
   const expense = varExpense + fixedExpense;
-  return { m, txs, income, expense, varIncome, varExpense, fixedIncome, fixedExpense, saving, bills, byCat, net: income - expense, left: income - expense - saving, txCount: txs.length };
+  return { m, txs, income, expense, varIncome, varExpense, fixedIncome, fixedExpense, saving, bills, actual, byCat, net: income - expense, left: income - expense - saving, txCount: txs.length };
 }
 function sum(arr) { return arr.reduce((a, b) => a + (Number(b.amount) || 0), 0); }
 
@@ -265,7 +268,7 @@ function renderGoalSummary() {
 function txItem(t) {
   return `<li data-edit-tx="${t.id}">
     <div class="li-main">${catIcon(t.category, t.type)}<div><div class="title">${esc(t.memo || t.category)}</div><div class="sub">${esc(t.category)} · ${Number(t.date.slice(8))}일${t.auto ? ' · <span class="pill">자동</span>' : ''}</div></div></div>
-    <div class="amount ${t.type}">${t.type === 'income' ? '+' : '−'}${won(t.amount)}</div>
+    <div class="amount ${t.type === 'saving' ? 'income' : t.type}">${t.type === 'income' ? '+' : t.type === 'saving' ? '↗' : '−'}${won(t.amount)}</div>
   </li>`;
 }
 
@@ -536,6 +539,7 @@ function renderInsights() {
   const efTarget = monthlyExp * 3;
   const efOk = monthlyExp > 0 && st.emergency >= efTarget;
   view.innerHTML = `
+    ${coachHtml()}
     ${accountCardHtml()}
     <section class="card">
       <h2>절약</h2>
@@ -571,6 +575,62 @@ function renderInsights() {
     </section>
   `;
 }
+
+/* ===================== AI 재무 코치 ===================== */
+// 보내는 데이터: 집계값과 항목 이름·금액만(내역 메모·계좌·실명 없음)
+function coachSnapshot() {
+  const now = ym(new Date());
+  const act = activeFixed(now);
+  const pick = f => ({ name: f.name, category: f.category, amount: f.amount, ...(f.day ? { day: f.day } : {}), ...(f.until ? { until: f.until } : {}) });
+  const months = Array.from({ length: 6 }, (_, i) => shiftMonth(now, -i)).reverse().map(m => {
+    const s = monthStats(m);
+    const top = Object.entries(s.byCat).sort((a, b) => b[1] - a[1]).slice(0, 5);
+    return { month: m, income: s.income, expense: s.expense, investAndSaving: s.saving, leftover: s.left, basis: s.actual ? '실제 기록' : '고정 항목+기록', topVariable: Object.fromEntries(top) };
+  });
+  return {
+    today: todayStr(),
+    fixedIncome: act.filter(f => f.type === 'income').map(pick),
+    fixedExpenses: act.filter(f => f.type === 'expense' && !f.until && f.category !== '보험').map(pick),
+    insurance: act.filter(f => f.type === 'expense' && f.category === '보험').map(pick),
+    installments: act.filter(f => f.type === 'expense' && f.until).map(pick),
+    utilities: (state.bills || []).map(b => ({ name: b.name, type: b.cat, recentAvg: billAvg(b), thisMonth: billAmount(b, now).v })),
+    investmentsMonthly: act.filter(f => f.type === 'saving').map(pick),
+    goals: state.goals.map(g => ({ name: g.name, target: g.target, saved: g.saved, deadline: g.deadline, assumedReturnPct: g.rate })),
+    emergencyFundCash: state.settings.emergency || 0,
+    highInterestDebt: !!state.settings.highDebt,
+    months,
+    notes: '투자는 지출이 아님(저축으로 간주). leftover = 수입 − 지출 − 투자. 카드로 그때그때 쓰는 변동지출은 기록이 쌓이는 중이라 최근 달은 과소 집계일 수 있음.',
+  };
+}
+
+function coachHtml() {
+  const a = state.settings.aiAdvice;
+  if (coachBusy) return `<section class="card" id="coachCard"><h2>🧠 AI 코치</h2><div class="empty">분석 중… 최대 1~2분</div></section>`;
+  if (!a) return `<section class="card" id="coachCard"><div class="row"><h2>🧠 AI 코치</h2><button class="btn sm" id="coachBtn">진단</button></div></section>`;
+  const d = a.data, when = new Date(a.at);
+  return `<section class="card" id="coachCard">
+    <div class="row"><h2>🧠 AI 코치</h2><button class="link-btn" id="coachBtn">↻ ${when.getMonth() + 1}/${when.getDate()}</button></div>
+    <div class="coach-top"><div class="score" style="--p:${Math.max(0, Math.min(100, d.score))}"><b>${d.score}</b></div><p>${esc(d.summary)}</p></div>
+    <div class="tip ${d.goal?.etaMonths ? 'good' : 'warn'}"><b>🎯 월 ${won(d.goal?.monthlyNeeded || 0)}${d.goal?.etaMonths ? ` · ${d.goal.etaMonths}개월` : ''}</b>${esc(d.goal?.verdict || '')}</div>
+    ${(d.actions || []).sort((x, y) => x.priority - y.priority).map((x, i) => `
+      <details class="tip act"><summary><span><span class="pill">${esc(x.area)}</span> ${i + 1}. ${esc(x.title)}</span>${x.monthlyImpact ? `<span class="income">+${shortWon(x.monthlyImpact)}</span>` : ''}</summary>
+        <div><b>왜</b> ${esc(x.why)}</div><div><b>어떻게</b> ${esc(x.how)}</div></details>`).join('')}
+    ${(d.warnings || []).map(w => `<div class="hint">⚠ ${esc(w)}</div>`).join('')}
+    <div class="hint">AI 판단 · 세율·한도는 가입 전 확인</div>
+  </section>`;
+}
+let coachBusy = false;
+async function runCoach() {
+  if (!window.EokAI?.consent()) return;
+  coachBusy = true; refreshCoach();
+  try {
+    const data = await EokAI.advise(coachSnapshot());
+    state.settings.aiAdvice = { at: Date.now(), data };
+    save();
+  } catch (e) { toast(e.message || 'AI 실패'); }
+  coachBusy = false; refreshCoach();
+}
+function refreshCoach() { const el = document.getElementById('coachCard'); if (el) el.outerHTML = coachHtml(); }
 
 function accountCardHtml() {
   const st = window.EokSync?.status() || { phase: 'loading' };
@@ -1050,7 +1110,7 @@ function openBillSheet(b) {
 
 
 // 공과금 목록 붙여넣기: "| 이름 | 종류 | 납부일 | 월 | 금액 |" 표나 "전기요금 2026-09 78,700원" 줄을 월별 기록으로
-function parseBillList(text) {
+function parseBillList(text, maxAmount = 5e6) {
   const now = new Date(), out = new Map();
   for (const raw of String(text).split('\n')) {
     const line = raw.trim();
@@ -1064,8 +1124,9 @@ function parseBillList(text) {
     if (!m || m < 1 || m > 12) continue;
     const amtCell = cells ? cells.find(c => /원|₩|^\d{1,3}(,\d{3})+$/.test(c) && !/월$/.test(c)) : line.replace(mm[0], ' '); // 날짜 숫자가 금액에 붙지 않게
     const amount = amtCell ? SmsParser.parseKoreanAmount(amtCell) : 0;
-    if (!amount || amount > 5e6) continue;
-    let name = cells ? cells.find(c => c && !/\d{4}[.\-/년]|^\d{1,2}\s*월$|원|₩|^\d+일$|^\d[\d,]*$/.test(c) && !BILL_CATS.includes(c)) : line.split(/\s*\d/)[0];
+    if (!amount || amount > maxAmount) continue;
+    // 이름 = 날짜·금액·납부일·구분(수입/지출/투자) 칸이 아닌 첫 칸
+    let name = cells ? cells.find(c => c && !/\d{4}[.\-/년]|^\d{1,2}\s*월$|원|₩|^\d+일$|^\d[\d,]*$|^(수입|지출|투자|저축|구분)$/.test(c)) : line.split(/\s*\d/)[0];
     name = String(name || '').replace(/\s*\([^)]*\)/g, '').trim();
     if (!name || /^(이름|항목|종류|구분|합계|월|금액)/.test(name)) continue;
     const cat = (cells && cells.find(c => BILL_CATS.includes(c))) || Object.keys(BILL_KEY).find(k => BILL_KEY[k].test(all)) || '기타';
@@ -1091,8 +1152,9 @@ function openBillImportSheet(initialText = '') {
       let nb = 0, nr = 0;
       for (const f of found) {
         const ex = state.bills.find(b => normName(b.name) === normName(f.name));
-        if (ex) { ex.rec = { ...(ex.rec || {}), ...f.rec }; if (!ex.day && f.day) ex.day = f.day; }
-        else { state.bills.push({ id: uid(), name: f.name, cat: f.cat, day: f.day, rec: f.rec, paid: {} }); nb++; }
+        const paid = Object.fromEntries(Object.keys(f.rec).filter(m => m <= ym(new Date())).map(m => [m, true])); // 실제 결제 기록이므로 납부
+        if (ex) { ex.rec = { ...(ex.rec || {}), ...f.rec }; ex.paid = { ...(ex.paid || {}), ...paid }; if (!ex.day && f.day) ex.day = f.day; }
+        else { state.bills.push({ id: uid(), name: f.name, cat: f.cat, day: f.day, rec: f.rec, paid }); nb++; }
         nr += Object.keys(f.rec).length;
       }
       setTimeout(() => toast(`공과금 ${nb ? `${nb}개 추가 · ` : ''}기록 ${nr}건`), 100);
@@ -1127,24 +1189,29 @@ function openMonthSumSheet(initialText = '') {
       for (const r of rows) {
         const memo = `${r.name} (월합계)`;
         state.tx = state.tx.filter(t => !(t.memo === memo && t.date.startsWith(r.m))); // 같은 월 합계는 덮어쓰기
-        state.tx.push({ id: uid(), type: 'expense', amount: r.amount, category: r.cat, memo, date: `${r.m}-28` });
+        state.tx.push({ id: uid(), type: r.type, amount: r.amount, category: r.cat, memo, date: `${r.m}-28`, sum: true });
       }
       setTimeout(() => toast(`월 합계 ${rows.length}건`), 100);
     });
   const ta = form.querySelector('textarea'), submit = form.querySelector('button[type=submit]'), box = form.querySelector('#sumPreview');
   const update = () => {
-    const parsed = parseBillList(ta.value);
+    const parsed = parseBillList(ta.value, 1e10);
     rows = [];
     let skipped = 0;
+    const lines = ta.value.split('\n');
     for (const p of parsed) for (const [m, amount] of Object.entries(p.rec)) {
       if (m >= cur) { skipped++; continue; }
-      const cat = EXPENSE_CATS.find(c => ta.value.split('\n').some(l => l.includes(p.name) && l.includes(c))) || SmsParser.guessCategory('expense', p.name, p.name);
-      rows.push({ name: p.name, m, amount, cat: /주유|기름|지하철|버스|택시|교통|후불/.test(p.name) ? '교통' : cat });
+      const ln = lines.filter(l => l.includes(p.name)).join(' ');
+      const type = /\|\s*수입\s*\||^수입\b/.test(ln) ? 'income' : /\|\s*(투자|저축)\s*\||^(투자|저축)\b/.test(ln) ? 'saving' : 'expense';
+      const cats = type === 'income' ? INCOME_CATS : type === 'saving' ? SAVING_CATS : EXPENSE_CATS;
+      let cat = cats.find(c => ln.includes(c));
+      if (!cat) cat = type === 'income' ? '기타' : type === 'saving' ? savingCat(p.name) : (/주유|기름|지하철|버스|택시|교통|후불/.test(p.name) ? '교통' : SmsParser.guessCategory('expense', p.name, p.name));
+      rows.push({ name: p.name, m, amount, cat, type });
     }
     rows.sort((a, b) => a.m.localeCompare(b.m) || a.name.localeCompare(b.name));
     submit.textContent = rows.length ? `${rows.length}건 등록` : '등록';
     box.innerHTML = rows.length ? `${skipped ? `<div class="hint">이번 달 ${skipped}건 제외 (문자로 기록)</div>` : ''}<table class="mini">${rows.map(r =>
-      `<tr><td>${Number(r.m.slice(5))}월 · ${esc(r.name)} <span class="muted">${esc(r.cat)}</span></td><td>${won(r.amount)}</td></tr>`).join('')}</table>` : (ta.value.trim() ? '<div class="empty">인식 실패</div>' : '');
+      `<tr><td>${Number(r.m.slice(5))}월 · ${esc(r.name)} <span class="muted">${r.type === 'income' ? '수입' : r.type === 'saving' ? '투자' : ''} ${esc(r.cat)}</span></td><td class="${r.type === 'income' ? 'income' : ''}">${r.type === 'expense' ? '−' : '+'}${won(r.amount)}</td></tr>`).join('')}</table>` : (ta.value.trim() ? '<div class="empty">인식 실패</div>' : '');
   };
   ta.addEventListener('input', update);
   form.querySelector('[data-act=clear]').onclick = () => { ta.value = ''; update(); };
@@ -1303,7 +1370,7 @@ $('#monthLabel').onclick = () => openPicker();
 $('#fab').onclick = () => openTxSheet();
 
 view.addEventListener('click', e => {
-  const el = e.target.closest('[data-month-sum],[data-bill-import],[data-bill-paid],[data-bill],[data-add-bill],[data-bill-migrate],[data-open-month],[data-import-fixed],[data-clear-ended],[data-sms],[data-day],[data-clear-day],[data-edit-tx],[data-edit-fixed],[data-add-fixed],[data-edit-goal],[data-add-goal],[data-goto],#exportBtn,#importBtn,#resetBtn,#updateBtn,#loginBtn,#logoutBtn,#syncBtn,#dropBtn,[data-copy]');
+  const el = e.target.closest('[data-month-sum],[data-bill-import],[data-bill-paid],[data-bill],[data-add-bill],[data-bill-migrate],[data-open-month],[data-import-fixed],[data-clear-ended],[data-sms],[data-day],[data-clear-day],[data-edit-tx],[data-edit-fixed],[data-add-fixed],[data-edit-goal],[data-add-goal],[data-goto],#exportBtn,#importBtn,#resetBtn,#updateBtn,#loginBtn,#logoutBtn,#syncBtn,#dropBtn,#coachBtn,[data-copy]');
   if (!el) return;
   if ('monthSum' in el.dataset) openMonthSumSheet();
   else if ('billImport' in el.dataset) openBillImportSheet();
@@ -1327,6 +1394,7 @@ view.addEventListener('click', e => {
   else if (el.dataset.editGoal) openGoalSheet(state.goals.find(g => g.id === el.dataset.editGoal));
   else if ('addGoal' in el.dataset) openGoalSheet();
   else if (el.dataset.goto) { currentTab = el.dataset.goto; render(); }
+  else if (el.id === 'coachBtn') runCoach();
   else if (el.id === 'dropBtn') showDrop();
   else if (el.dataset.copy !== undefined) {
     const v = document.getElementById(el.dataset.copy)?.textContent || '';
