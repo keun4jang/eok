@@ -4,9 +4,12 @@
 // 버전은 배포(scripts/deploy.sh) 때 version.js에 자동으로 매겨진다 — 손으로 올리지 않음
 const APP_VERSION = window.EOK_VERSION?.n ? `v${window.EOK_VERSION.n}` : 'dev';
 const STORAGE_KEY = 'moneyplan.v1'; // 앱 이름이 '억'으로 바뀌었지만 기존 데이터 호환을 위해 키 유지
-const EXPENSE_CATS = ['식비', '카페/간식', '교통', '쇼핑', '생활용품', '주거/관리비', '통신', '구독', '보험', '문화/여가', '의료', '교육', '가족·커플', '경조사', '대출이자', '기타'];
+const BASE_EXPENSE = ['식비', '배달', '카페/간식', '술·유흥', '교통', '자동차', '쇼핑', '생활용품', '미용', '주거/관리비', '통신', '구독', '보험', '문화/여가', '여행', '운동', '의료', '교육', '반려동물', '가족·커플', '경조사', '세금·수수료', '대출이자', '기타'];
+const BASE_INCOME = ['급여', '부수입', '상여', '이자/배당', '용돈', '기타'];
+// 사용자 카테고리(settings.customCats)를 기본 목록 뒤('기타' 앞)에 붙인다. 배열은 그 자리에서 갱신(다른 곳이 같은 배열을 참조)
+const EXPENSE_CATS = [...BASE_EXPENSE];
 const SAVING_CATS = ['주식·ETF', '적금·청약', '연금', '코인', '기타투자'];
-const INCOME_CATS = ['급여', '부수입', '상여', '이자/배당', '용돈', '기타'];
+const INCOME_CATS = [...BASE_INCOME];
 // 줄이기 쉬운(재량) 지출 카테고리 — 목표 달성 부족분을 여기서 우선 깎는다
 const DISCRETIONARY = ['카페/간식', '쇼핑', '문화/여가', '식비', '생활용품', '기타'];
 
@@ -14,10 +17,17 @@ const DISCRETIONARY = ['카페/간식', '쇼핑', '문화/여가', '식비', '�
 const CAT_COLORS = {
   '식비': '#C8A96A', '카페/간식': '#B88A6A', '교통': '#7F93B5', '쇼핑': '#A88BA8', '생활용품': '#8FB8A0',
   '주거/관리비': '#6F8FA3', '통신': '#9AA6B8', '구독': '#C48E9A', '보험': '#8C9C7A', '문화/여가': '#D1B98A',
-  '의료': '#7FA8A4', '교육': '#9C8FC4', '가족·커플': '#C79BA0', '주식·ETF': '#8FA8C8', '적금·청약': '#A3C2AE', '연금': '#BFAE8E', '코인': '#C8A96A', '기타투자': '#9AA6B8', '경조사': '#C9876F', '대출이자': '#A0705F', '기타': '#8A8F98',
+  '의료': '#7FA8A4', '교육': '#9C8FC4', '가족·커플': '#C79BA0', '배달': '#D1A06A', '술·유흥': '#B07A8C', '자동차': '#7A8FA6', '미용': '#C9A0B4', '여행': '#6FA3C0', '운동': '#8FB88F', '반려동물': '#B8A07A', '세금·수수료': '#9A9A8A', '주식·ETF': '#8FA8C8', '적금·청약': '#A3C2AE', '연금': '#BFAE8E', '코인': '#C8A96A', '기타투자': '#9AA6B8', '경조사': '#C9876F', '대출이자': '#A0705F', '기타': '#8A8F98',
   '급여': '#8FB8A0', '부수입': '#A3C2AE', '상여': '#C8A96A', '이자/배당': '#7FA8A4', '용돈': '#B5A3C4',
 };
-const catColor = c => CAT_COLORS[c] || '#8A8F98';
+const PALETTE = ['#C8A96A', '#8FB8A0', '#7F93B5', '#A88BA8', '#C9876F', '#6FA3A0', '#C48E9A', '#9DA36F', '#B5A3C4', '#BFAE8E'];
+const catColor = c => CAT_COLORS[c] || PALETTE[[...String(c)].reduce((a, ch) => a + ch.charCodeAt(0), 0) % PALETTE.length];
+function refreshCats() {
+  const cc = (typeof state !== 'undefined' && state.settings?.customCats) || {};
+  const merge = (base, extra) => [...base.slice(0, -1), ...(extra || []).filter(c => !base.includes(c)), '기타'];
+  EXPENSE_CATS.splice(0, EXPENSE_CATS.length, ...merge(BASE_EXPENSE, cc.expense));
+  INCOME_CATS.splice(0, INCOME_CATS.length, ...merge(BASE_INCOME, cc.income));
+}
 const catIcon = (c, type) => `<span class="cat-ic" style="--c:${catColor(c)}">${esc(String(c).charAt(0))}</span>`;
 
 const defaultState = () => ({
@@ -31,6 +41,7 @@ const defaultState = () => ({
 });
 
 let state = load();
+refreshCats();
 let snap = SyncCore.snapshot(state); // 마지막 저장 시점 스냅샷 — 저장할 때 바뀐 레코드에 수정 시각(u)을 찍는 데 사용
 let currentTab = 'home';
 let viewMonth = ym(new Date());
@@ -62,6 +73,7 @@ function persist() {
 function adopt(next) {
   state = { ...defaultState(), ...next, settings: { ...defaultState().settings, ...(next.settings || {}) } };
   snap = SyncCore.snapshot(state);
+  refreshCats();
   persist();
   if (!sheet.open) render();
 }
@@ -215,6 +227,7 @@ function renderHome() {
       </div>
     </section>
 
+    ${uncategorized().length ? `<button class="sms-cta" data-classify><span class="cat-ic" style="--c:var(--gold)">❓</span><span><b>분류 필요 ${uncategorized().length}</b></span><span class="chev">›</span></button>` : ''}
     <section class="card grid2 compact">
       <div class="stat"><div class="label">고정지출</div><div class="value">${won(s.fixedExpense)}</div></div>
       <div class="stat"><div class="label">변동지출</div><div class="value">${won(s.varExpense)}</div></div>
@@ -566,6 +579,7 @@ function renderInsights() {
       <label style="display:flex;align-items:center;gap:8px;color:var(--text)"><input type="checkbox" id="setDebt" style="width:auto" ${st.highDebt ? 'checked' : ''}/> 고금리 빚 있음</label>
     </section>
 
+    ${catsHtml()}
     <section class="card">
       <h2>데이터</h2>
       <div class="actions">
@@ -925,10 +939,17 @@ function buildSmsItems(text) {
   buildSmsItems.skipped = skipped;
   return smsItemsFrom(results);
 }
+// 학습한 가맹점 카테고리: 정확히 같은 이름 → 없으면 공백·괄호 무시하고 한쪽이 다른 쪽을 포함(2자 이상)
+function learnedCat(memo) {
+  const mc = state.merchantCats || {}; if (mc[memo]) return mc[memo];
+  const n = normName(memo); if (n.length < 2) return null;
+  const k = Object.keys(mc).find(k => { const m = normName(k); return m.length >= 2 && (m.includes(n) || n.includes(m)); });
+  return k ? mc[k] : null;
+}
 function smsItemsFrom(results) {
   return results.map(r => {
     const memo = r.merchant || (r.type === 'income' ? '입금' : '카드 결제');
-    const learned = state.merchantCats?.[memo];
+    const learned = learnedCat(memo);
     const type = r.type === 'cancel' ? 'cancel' : r.type;
     const category = learned && type !== 'cancel' && (type === 'income' ? INCOME_CATS : EXPENSE_CATS).includes(learned) ? learned : r.category;
     const dup = type !== 'cancel' && state.tx.some(t => t.date === r.date && t.amount === r.amount && (t.memo === memo || t.type === type));
@@ -1340,6 +1361,66 @@ function openAssetSheet(x) {
     isNew ? null : () => { state.assets = state.assets.filter(a => a.id !== x.id); syncLinkedGoals(); });
 }
 
+
+/* ===================== 분류 필요 · 카테고리 관리 ===================== */
+// '기타'로 들어간 건별 지출(월 합계 제외) → 사용자가 고르고, 같은 가맹점은 학습
+const uncategorized = () => state.tx.filter(t => t.type === 'expense' && t.category === '기타' && !t.sum);
+function openClassifySheet() {
+  const draw = () => {
+    const list = uncategorized().sort((a, b) => b.date.localeCompare(a.date));
+    form.innerHTML = `<h2>❓ 분류 필요 ${list.length}</h2>
+      ${list.length ? list.slice(0, 30).map(t => `
+        <div class="sms-item" data-cls="${t.id}">
+          <div class="row"><div><div class="title">${esc(t.memo || '–')}</div><div class="sub">${Number(t.date.slice(5, 7))}/${Number(t.date.slice(8))}</div></div><b class="expense">−${won(t.amount)}</b></div>
+          <div class="chips">${EXPENSE_CATS.filter(c => c !== '기타').map(c => `<button type="button" class="chip" data-pick-cat="${esc(c)}" style="--c:${catColor(c)}">${esc(c)}</button>`).join('')}</div>
+        </div>`).join('') : '<div class="empty">✓</div>'}
+      <div class="actions"><button type="button" class="btn ghost" data-act="close">닫기</button></div>`;
+  };
+  form.onsubmit = e => e.preventDefault();
+  form.onclick = e => {
+    if (e.target.closest('[data-act=close]')) { sheet.close(); return; }
+    const b = e.target.closest('[data-pick-cat]'); if (!b) return;
+    const t = state.tx.find(x => x.id === b.closest('[data-cls]').dataset.cls); if (!t) return;
+    const cat = b.dataset.pickCat;
+    // 같은 가맹점의 다른 미분류도 함께 + 학습
+    const same = uncategorized().filter(x => x.memo && x.memo === t.memo);
+    (same.length ? same : [t]).forEach(x => { x.category = cat; });
+    if (t.memo) { state.merchantCats = state.merchantCats || {}; state.merchantCats[t.memo] = cat; }
+    save(); toast(`${cat}${same.length > 1 ? ` · ${same.length}건` : ''}`); draw();
+  };
+  sheet.addEventListener('close', () => { form.onclick = null; render(); }, { once: true });
+  draw(); sheet.showModal();
+}
+
+function catsHtml() {
+  const cc = state.settings.customCats || {};
+  const chip = (c, kind) => `<span class="chip" style="--c:${catColor(c)}">${esc(c)}${(cc[kind] || []).includes(c) ? ` <button class="x" data-del-cat="${kind}|${esc(c)}">✕</button>` : ''}</span>`;
+  return `<section class="card"><h2>카테고리</h2>
+    <div class="muted">지출</div><div class="chips">${EXPENSE_CATS.map(c => chip(c, 'expense')).join('')}</div>
+    <div class="muted" style="margin-top:8px">수입</div><div class="chips">${INCOME_CATS.map(c => chip(c, 'income')).join('')}</div>
+    <div class="row" style="margin-top:10px;gap:6px">
+      <select id="newCatKind" style="width:auto"><option value="expense">지출</option><option value="income">수입</option></select>
+      <input id="newCatName" maxlength="10" placeholder="새 카테고리">
+      <button class="btn sm" id="addCatBtn">＋</button>
+    </div></section>`;
+}
+function addCat() {
+  const kind = document.getElementById('newCatKind').value, name = document.getElementById('newCatName').value.trim().replace(/[|]/g, '');
+  if (!name) return;
+  if ((kind === 'income' ? INCOME_CATS : EXPENSE_CATS).includes(name)) { toast('이미 있음'); return; }
+  const cc = state.settings.customCats = { expense: [], income: [], ...(state.settings.customCats || {}) };
+  cc[kind] = [...(cc[kind] || []), name];
+  refreshCats(); save(); render();
+}
+function delCat(kind, name) {
+  const used = state.tx.filter(t => t.category === name).length + state.fixed.filter(f => f.category === name).length;
+  if (!confirm(`'${name}' 삭제?${used ? `\n쓰인 ${used}건은 '기타'로` : ''}`)) return;
+  state.tx.forEach(t => { if (t.category === name) t.category = '기타'; });
+  state.fixed.forEach(f => { if (f.category === name) f.category = '기타'; });
+  const cc = state.settings.customCats || {}; cc[kind] = (cc[kind] || []).filter(c => c !== name);
+  state.settings.customCats = cc; refreshCats(); save(); render();
+}
+
 /* ===================== 연간 보기 + 월/연 선택 ===================== */
 // 기록 시작 월: 첫 거래 월과 고정 항목을 처음 저장한 월 중 이른 쪽.
 // (고정 항목은 시작일이 없어 모든 달에 적용되므로, 그 이전 달은 연간 합계에서 제외해야 가짜 숫자가 안 생김)
@@ -1477,9 +1558,12 @@ $('#monthLabel').onclick = () => openPicker();
 $('#fab').onclick = () => openTxSheet();
 
 view.addEventListener('click', e => {
-  const el = e.target.closest('[data-asset],[data-add-asset],[data-month-sum],[data-bill-import],[data-bill-paid],[data-bill],[data-add-bill],[data-bill-migrate],[data-open-month],[data-import-fixed],[data-clear-ended],[data-sms],[data-day],[data-clear-day],[data-edit-tx],[data-edit-fixed],[data-add-fixed],[data-edit-goal],[data-add-goal],[data-goto],#exportBtn,#importBtn,#resetBtn,#updateBtn,#loginBtn,#logoutBtn,#syncBtn,#dropBtn,#coachBtn,[data-copy]');
+  const el = e.target.closest('[data-classify],[data-del-cat],#addCatBtn,[data-asset],[data-add-asset],[data-month-sum],[data-bill-import],[data-bill-paid],[data-bill],[data-add-bill],[data-bill-migrate],[data-open-month],[data-import-fixed],[data-clear-ended],[data-sms],[data-day],[data-clear-day],[data-edit-tx],[data-edit-fixed],[data-add-fixed],[data-edit-goal],[data-add-goal],[data-goto],#exportBtn,#importBtn,#resetBtn,#updateBtn,#loginBtn,#logoutBtn,#syncBtn,#dropBtn,#coachBtn,[data-copy]');
   if (!el) return;
-  if (el.dataset.asset) openAssetSheet(state.assets.find(a => a.id === el.dataset.asset));
+  if ('classify' in el.dataset) openClassifySheet();
+  else if (el.dataset.delCat) { const [k, n] = el.dataset.delCat.split('|'); delCat(k, n); }
+  else if (el.id === 'addCatBtn') addCat();
+  else if (el.dataset.asset) openAssetSheet(state.assets.find(a => a.id === el.dataset.asset));
   else if ('addAsset' in el.dataset) openAssetSheet();
   else if ('monthSum' in el.dataset) openMonthSumSheet();
   else if ('billImport' in el.dataset) openBillImportSheet();

@@ -378,3 +378,8 @@ details.act > div { margin-top: 6px; }
 details.act > div b { color: var(--text); margin-right: 4px; }
 
 .spark { width: 100%; height: 44px; display: block; margin: 8px 0 4px; }
+
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.chip { border: 1px solid color-mix(in srgb, var(--c) 35%, transparent); background: color-mix(in srgb, var(--c) 12%, transparent); color: var(--text);
+  border-radius: 99px; padding: 4px 10px; font-size: 12px; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; }
+.chip .x { border: 0; background: none; color: var(--muted); padding: 0 0 0 2px; cursor: pointer; font-size: 11px; }
