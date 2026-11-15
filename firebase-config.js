@@ -8,6 +8,6 @@ export default {
   storageBucket: 'eok-app-e1d57.firebasestorage.app',
   messagingSenderId: '693601275486',
   appId: '1:693601275486:web:c25019a5c58a64d4f2aecf',
-  // App Check(reCAPTCHA v3) 사이트 키 — 공개 값. 비밀 키는 Firebase 콘솔에만 있음.
-  appCheckSiteKey: '6LeqsiEuAAAAAMbqOIkQ50JTnzTgreo7ikasrc-K',
+  // App Check(reCAPTCHA v3 클래식)는 Firebase에서 신규 등록이 막혀(지원 중단) 사용하지 않음.
+  // 필요해지면 Fraud Defense(reCAPTCHA Enterprise)로: appCheckSiteKey 넣고 sync.js 제공자 교체.
 };
