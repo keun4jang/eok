@@ -63,6 +63,17 @@ async function syncNow() {
     }
     for (const k of Object.keys(remoteChunks)) if (!(k in mergedChunks)) { batch.delete(doc(col, k)); writes++; }
     if (writes) await batch.commit();
+
+    // 자동 수집함: 폰 자동화 앱(MacroDroid 등)이 넣어둔 결제 알림 → 앱에 등록 후 삭제
+    const inbox = collection(fb.db, 'users', uid, 'inbox');
+    const got = [];
+    (await getDocs(inbox)).forEach(d => got.push({ id: d.id, text: String(d.data().text || '') }));
+    if (got.length) {
+      window.EokApp.ingest(got.map(g => g.text));
+      const del = writeBatch(fb.db);
+      got.forEach(g => del.delete(doc(inbox, g.id)));
+      await del.commit();
+    }
     set({ phase: 'ready', last: Date.now(), error: '' });
   } catch (e) {
     set({ phase: 'ready', error: msg(e) });
@@ -98,7 +109,26 @@ function msg(e) {
   return e?.message || String(e);
 }
 
-window.EokSync = { status: () => st, login, logout, syncNow, schedule };
+// 자동 수집 열쇠: 이 값을 아는 요청만 수집함에 쓸 수 있다(Firestore 규칙에서 검사)
+async function dropInfo(create = false) {
+  if (!fb?.authInst.currentUser) return null;
+  const { doc, getDoc, setDoc } = fb.fs;
+  const uid = fb.authInst.currentUser.uid;
+  const ref = doc(fb.db, 'users', uid, 'private', 'drop');
+  let key = (await getDoc(ref)).data()?.key;
+  if (!key && create) {
+    const a = new Uint8Array(18); crypto.getRandomValues(a);
+    key = Array.from(a, b => b.toString(16).padStart(2, '0')).join('');
+    await setDoc(ref, { key });
+  }
+  if (!key) return null;
+  return {
+    url: `https://firestore.googleapis.com/v1/projects/${config.projectId}/databases/(default)/documents/users/${uid}/inbox?key=${config.apiKey}`,
+    key,
+  };
+}
+
+window.EokSync = { status: () => st, login, logout, syncNow, schedule, dropInfo };
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') schedule(300); });
 window.addEventListener('online', () => schedule(300));
 if (config) init(); else window.EokApp?.refreshAccount();

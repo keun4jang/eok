@@ -1,7 +1,7 @@
 'use strict';
 
 /* ===================== 데이터 ===================== */
-const APP_VERSION = 'v9 · 2026-11-15'; // 앱을 고칠 때마다 sw.js의 CACHE와 함께 올릴 것
+const APP_VERSION = 'v10 · 2026-11-15'; // 앱을 고칠 때마다 sw.js의 CACHE와 함께 올릴 것
 const STORAGE_KEY = 'moneyplan.v1'; // 앱 이름이 '억'으로 바뀌었지만 기존 데이터 호환을 위해 키 유지
 const EXPENSE_CATS = ['식비', '카페/간식', '교통', '쇼핑', '생활용품', '주거/관리비', '통신', '구독', '보험', '문화/여가', '의료', '교육', '경조사', '대출이자', '기타'];
 const INCOME_CATS = ['급여', '부수입', '상여', '이자/배당', '용돈', '기타'];
@@ -255,7 +255,7 @@ function renderGoalSummary() {
 
 function txItem(t) {
   return `<li data-edit-tx="${t.id}">
-    <div class="li-main">${catIcon(t.category, t.type)}<div><div class="title">${esc(t.memo || t.category)}</div><div class="sub">${esc(t.category)} · ${Number(t.date.slice(8))}일</div></div></div>
+    <div class="li-main">${catIcon(t.category, t.type)}<div><div class="title">${esc(t.memo || t.category)}</div><div class="sub">${esc(t.category)} · ${Number(t.date.slice(8))}일${t.auto ? ' · <span class="pill">자동</span>' : ''}</div></div></div>
     <div class="amount ${t.type}">${t.type === 'income' ? '+' : '−'}${won(t.amount)}</div>
   </li>`;
 }
@@ -552,14 +552,48 @@ function accountCardHtml() {
   else body = `<div class="row"><div><div class="title">${esc(st.user.name || '')}</div><div class="muted">${esc(st.user.email || '')}</div></div>
       <button class="link-btn" id="logoutBtn">로그아웃</button></div>
       <div class="row" style="margin-top:8px"><span class="muted">${st.phase === 'syncing' ? '동기화 중…' : time ? `마지막 동기화 ${time}` : '동기화 대기'}</span>
-      <button class="btn sm ghost" id="syncBtn">지금 동기화</button></div>`;
+      <button class="btn sm ghost" id="syncBtn">지금 동기화</button></div>
+      <h3>결제 알림 자동 수집</h3>
+      <p class="muted" style="margin:0 0 8px">폰 자동화 앱(MacroDroid)이 카드 문자·카톡 알림을 클라우드 수집함으로 보내면, 억을 열 때 자동 등록됩니다.</p>
+      <div id="dropBox">${dropHtml()}</div>`;
   return `<section class="card" id="accountCard"><h2>계정</h2>${body}${st.error && st.user ? `<div class="tip warn"><b>동기화 문제</b>${esc(st.error)}</div>` : ''}</section>`;
+}
+let dropShown = null; // 자동 수집 설정값(한 번 불러오면 카드 다시 그려도 유지)
+function dropHtml() {
+  if (!dropShown) return '<button class="btn sm ghost" id="dropBtn">설정값 보기</button>';
+  if (dropShown.error) return `<p class="muted">불러오기 실패: ${esc(dropShown.error)}</p><button class="btn sm ghost" id="dropBtn">다시 시도</button>`;
+  if (dropShown.loading) return '<p class="muted">불러오는 중…</p>';
+  const body = `{"fields":{"text":{"stringValue":"[notification_title] [notification]"},"key":{"stringValue":"${dropShown.key}"}}}`;
+  return `
+    <label>① 요청 주소 (POST)</label><div class="codebox" id="dropUrl">${esc(dropShown.url)}</div><button class="link-btn" data-copy="dropUrl">복사</button>
+    <label>② 본문 (Content-Type: application/json)</label><div class="codebox" id="dropBody">${esc(body)}</div><button class="link-btn" data-copy="dropBody">복사</button>
+    <p class="hint">열쇠(key)를 아는 사람은 수집함에 글을 넣을 수 있으니 공유하지 마세요. 읽기·삭제는 본인 로그인으로만 가능합니다.</p>`;
+}
+async function showDrop() {
+  dropShown = { loading: true }; refreshAccount();
+  try { dropShown = await window.EokSync.dropInfo(true); }
+  catch (e) { dropShown = { error: e.message || String(e) }; }
+  refreshAccount();
 }
 function refreshAccount() {
   const el = document.getElementById('accountCard');
   if (el) el.outerHTML = accountCardHtml();
 }
-window.EokApp = { getState: () => state, adopt, refreshAccount };
+// 자동 수집: 알림 원문들을 문자 입력과 같은 규칙으로 해석해 바로 등록
+// (중복 의심·고정 항목과 겹침은 건너뜀, 승인취소는 원 거래 삭제). 등록된 거래에는 auto 표시.
+function ingest(texts) {
+  const items = buildSmsItems(texts.join('\n\n'));
+  let added = 0, removed = 0;
+  for (const it of items) {
+    if (!it.on) continue;
+    if (it.type === 'cancel') { if (it.cancelTarget) { state.tx = state.tx.filter(t => t.id !== it.cancelTarget); removed++; } continue; }
+    state.tx.push({ id: uid(), type: it.type, amount: it.amount, category: it.category, memo: it.memo.trim(), date: it.date, auto: true });
+    added++;
+  }
+  if (added || removed) { save(); if (!sheet.open) render(); }
+  toast(`자동 수집 ${texts.length}건 → ${added}건 등록${removed ? ` · ${removed}건 취소 반영` : ''}${texts.length - added - removed > 0 ? ` · ${texts.length - added - removed}건 제외(중복·고정·인식 불가)` : ''}`);
+}
+window.EokApp = { getState: () => state, adopt, refreshAccount, ingest };
 
 function buildTips(avg) {
   const tips = [];
@@ -867,7 +901,7 @@ $('#nextMonth').onclick = () => { selectedDay = null; viewMonth = shiftMonth(vie
 $('#fab').onclick = () => openTxSheet();
 
 view.addEventListener('click', e => {
-  const el = e.target.closest('[data-import-fixed],[data-clear-ended],[data-sms],[data-day],[data-clear-day],[data-edit-tx],[data-edit-fixed],[data-add-fixed],[data-edit-goal],[data-add-goal],[data-goto],#exportBtn,#importBtn,#resetBtn,#updateBtn,#loginBtn,#logoutBtn,#syncBtn');
+  const el = e.target.closest('[data-import-fixed],[data-clear-ended],[data-sms],[data-day],[data-clear-day],[data-edit-tx],[data-edit-fixed],[data-add-fixed],[data-edit-goal],[data-add-goal],[data-goto],#exportBtn,#importBtn,#resetBtn,#updateBtn,#loginBtn,#logoutBtn,#syncBtn,#dropBtn,[data-copy]');
   if (!el) return;
   if ('importFixed' in el.dataset) openFixedImportSheet();
   else if ('clearEnded' in el.dataset) {
@@ -883,6 +917,11 @@ view.addEventListener('click', e => {
   else if (el.dataset.editGoal) openGoalSheet(state.goals.find(g => g.id === el.dataset.editGoal));
   else if ('addGoal' in el.dataset) openGoalSheet();
   else if (el.dataset.goto) { currentTab = el.dataset.goto; render(); }
+  else if (el.id === 'dropBtn') showDrop();
+  else if (el.dataset.copy !== undefined) {
+    const v = document.getElementById(el.dataset.copy)?.textContent || '';
+    navigator.clipboard.writeText(v).then(() => toast('복사했어요'), () => toast('복사 실패 — 길게 눌러 직접 복사하세요'));
+  }
   else if (el.id === 'loginBtn') window.EokSync?.login();
   else if (el.id === 'logoutBtn') window.EokSync?.logout();
   else if (el.id === 'syncBtn') window.EokSync?.syncNow();

@@ -176,6 +176,8 @@
   }
 
   function parseNotifications(input, now = new Date()) {
+    // 자동화 앱이 줄바꿈을 없애거나 '\n' 글자로 보내는 경우 복원: 글머리표(■ 등) 앞에서 줄을 나눈다
+    input = String(input).replace(/\\n/g, '\n').replace(/[ \t]+(?=[■□▶▷►•※◆◇●]\s*[가-힣])/g, '\n');
     const results = [];
     let skipped = 0;
     for (const chunk of splitMessages(input)) {
