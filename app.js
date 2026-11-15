@@ -5,6 +5,7 @@
 const APP_VERSION = window.EOK_VERSION?.n ? `v${window.EOK_VERSION.n}` : 'dev';
 const STORAGE_KEY = 'moneyplan.v1'; // 앱 이름이 '억'으로 바뀌었지만 기존 데이터 호환을 위해 키 유지
 const EXPENSE_CATS = ['식비', '카페/간식', '교통', '쇼핑', '생활용품', '주거/관리비', '통신', '구독', '보험', '문화/여가', '의료', '교육', '가족·커플', '경조사', '대출이자', '기타'];
+const SAVING_CATS = ['주식·ETF', '적금·청약', '연금', '코인', '기타투자'];
 const INCOME_CATS = ['급여', '부수입', '상여', '이자/배당', '용돈', '기타'];
 // 줄이기 쉬운(재량) 지출 카테고리 — 목표 달성 부족분을 여기서 우선 깎는다
 const DISCRETIONARY = ['카페/간식', '쇼핑', '문화/여가', '식비', '생활용품', '기타'];
@@ -13,7 +14,7 @@ const DISCRETIONARY = ['카페/간식', '쇼핑', '문화/여가', '식비', '�
 const CAT_COLORS = {
   '식비': '#C8A96A', '카페/간식': '#B88A6A', '교통': '#7F93B5', '쇼핑': '#A88BA8', '생활용품': '#8FB8A0',
   '주거/관리비': '#6F8FA3', '통신': '#9AA6B8', '구독': '#C48E9A', '보험': '#8C9C7A', '문화/여가': '#D1B98A',
-  '의료': '#7FA8A4', '교육': '#9C8FC4', '가족·커플': '#C79BA0', '경조사': '#C9876F', '대출이자': '#A0705F', '기타': '#8A8F98',
+  '의료': '#7FA8A4', '교육': '#9C8FC4', '가족·커플': '#C79BA0', '주식·ETF': '#8FA8C8', '적금·청약': '#A3C2AE', '연금': '#BFAE8E', '코인': '#C8A96A', '기타투자': '#9AA6B8', '경조사': '#C9876F', '대출이자': '#A0705F', '기타': '#8A8F98',
   '급여': '#8FB8A0', '부수입': '#A3C2AE', '상여': '#C8A96A', '이자/배당': '#7FA8A4', '용돈': '#B5A3C4',
 };
 const catColor = c => CAT_COLORS[c] || '#8A8F98';
@@ -96,11 +97,12 @@ function monthStats(m) {
   const fx = activeFixed(m);
   const fixedIncome = sum(fx.filter(f => f.type === 'income'));
   const fixedExpense = sum(fx.filter(f => f.type === 'expense'));
+  const saving = sum(fx.filter(f => f.type === 'saving')); // 고정 투자·저축: 지출 아님, 남는 돈에서만 뺌
   const byCat = {};
   txs.filter(t => t.type === 'expense').forEach(t => { byCat[t.category] = (byCat[t.category] || 0) + t.amount; });
   const income = varIncome + fixedIncome;
   const expense = varExpense + fixedExpense;
-  return { m, txs, income, expense, varIncome, varExpense, fixedIncome, fixedExpense, byCat, net: income - expense, txCount: txs.length };
+  return { m, txs, income, expense, varIncome, varExpense, fixedIncome, fixedExpense, saving, byCat, net: income - expense, left: income - expense - saving, txCount: txs.length };
 }
 function sum(arr) { return arr.reduce((a, b) => a + (Number(b.amount) || 0), 0); }
 
@@ -197,12 +199,13 @@ function renderHome() {
   view.innerHTML = `
     <section class="hero">
       <div class="hero-label">${monthLabel(viewMonth)} 남은 돈</div>
-      <div class="hero-amount ${s.net < 0 ? 'neg' : ''}">${won(s.net)}</div>
+      <div class="hero-amount ${s.left < 0 ? 'neg' : ''}">${won(s.left)}</div>
       <div class="hero-bar"><i style="width:${spentPct}%"></i></div>
       <div class="hero-meta"><span>지출 ${s.income > 0 ? pct(s.expense, s.income) : 0}%</span><span>저축률 ${s.income > 0 ? rate + '%' : '–'}</span></div>
       <div class="hero-split">
         <div><span>수입</span><b>${won(s.income)}</b></div>
         <div><span>지출</span><b>${won(s.expense)}</b></div>
+        ${s.saving ? `<div><span>투자</span><b>${won(s.saving)}</b></div>` : ''}
       </div>
     </section>
 
@@ -331,6 +334,7 @@ function renderFixed() {
   const exp = active.filter(f => f.type === 'expense' && !f.until).sort((a, b) => b.amount - a.amount);
   const inst = active.filter(f => f.type === 'expense' && f.until).sort((a, b) => a.until.localeCompare(b.until));
   const ended = state.fixed.filter(f => f.until && f.until < now);
+  const sav = active.filter(f => f.type === 'saving').sort((a, b) => b.amount - a.amount);
   const expTotal = sum(exp) + sum(inst), incTotal = sum(inc);
   const endingSoon = sum(inst.filter(f => f.until === now));
   const item = f => `<li data-edit-fixed="${f.id}">
@@ -341,6 +345,7 @@ function renderFixed() {
       <div class="muted">이번 달 고정지출</div>
       <div class="big expense">${won(expTotal)}</div>
       <div class="muted">${incTotal ? `수입 대비 ${pct(expTotal, incTotal)}%` : '수입 미등록'}${inst.length ? ` · 할부 ${won(sum(inst))}` : ''}</div>
+      ${sav.length ? `<div class="muted">투자 ${won(sum(sav))} · 남는 돈 ${won(incTotal - expTotal - sum(sav))}</div>` : ''}
       ${endingSoon ? `<div class="muted">다음 달 −${won(endingSoon)} (할부 끝)</div>` : ''}
     </section>
     <button class="sms-cta" data-import-fixed>
@@ -355,6 +360,10 @@ function renderFixed() {
       <div class="row"><h2>지출 <span class="h-sum expense">${won(sum(exp))}</span></h2><button class="btn sm ghost" data-add-fixed="expense">＋</button></div>
       ${exp.length ? `<ul class="list">${exp.map(item).join('')}</ul>` : `<div class="empty">없음</div>`}
     </section>
+    <section class="card">
+      <div class="row"><h2>투자 <span class="h-sum income">${won(sum(sav))}</span></h2><button class="btn sm ghost" data-add-fixed="saving">＋</button></div>
+      ${sav.length ? `<ul class="list">${sav.map(item).join('')}</ul>` : `<div class="empty">없음</div>`}
+    </section>
     ${inst.length ? `<section class="card"><h2>할부 <span class="h-sum expense">${won(sum(inst))}</span></h2><ul class="list">${inst.map(item).join('')}</ul></section>` : ''}
     ${ended.length ? `<section class="card"><div class="row"><h2 class="muted">끝난 할부 ${ended.length}건</h2><button class="link-btn" data-clear-ended>정리</button></div></section>` : ''}
   `;
@@ -367,7 +376,7 @@ function untilLabel(until, now) {
 
 /* ===================== 고정 항목 일괄 등록 ===================== */
 let fixedItems = [];
-const KIND_LABEL = { income: '수입', expense: '지출', installment: '할부', saving: '저축/이동', card: '카드대금' };
+const KIND_LABEL = { income: '수입', expense: '지출', installment: '할부', saving: '투자', card: '카드대금' };
 
 function openFixedImportSheet(initialText = '') {
   fixedItems = [];
@@ -413,10 +422,14 @@ function openFixedImportSheet(initialText = '') {
 
 const normName = s => String(s).replace(/\s|\(.*?\)|주식회사|㈜/g, '').toLowerCase();
 function buildFixedItems(text) { return fixedItemsFrom(SmsParser.parseFixedList(text, EXPENSE_CATS, INCOME_CATS)); }
+const savingCat = n => /적금|청약|예금/.test(n) ? '적금·청약' : /연금|IRP|ISA/i.test(n) ? '연금' : /코인|업비트|비트/.test(n) ? '코인' : (/주식|ETF|증권|투자|미래에셋|S&P|나스닥|KODEX|TIGER|ACE|SOL|모으기/i.test(n) || /^[A-Z]{2,5}\b/.test(n.trim())) ? '주식·ETF' : '기타투자';
 function fixedItemsFrom(list) {
   return list.map(it => {
-    const dup = state.fixed.some(f => normName(f.name) === normName(it.name) || (f.type === it.type && f.amount === it.amount && String(f.day) === String(it.day)));
-    const off = it.kind === 'saving' || it.kind === 'card' || (it.type === 'income' && it.amount < 1000); // 분기 이자 몇십 원 같은 수입은 기본 제외
+    if (it.kind === 'saving') it = { ...it, type: 'saving', category: SAVING_CATS.includes(it.category) ? it.category : savingCat(it.name) };
+    // 중복: 이름이 같거나, 같은 종류·카테고리에서 금액·날짜가 같을 때 (종류가 다르면 우연히 금액이 같아도 별개)
+    const dup = state.fixed.some(f => normName(f.name) === normName(it.name) ||
+      (f.type === it.type && f.category === it.category && f.amount === it.amount && String(f.day) === String(it.day)));
+    const off = it.kind === 'card' || (it.type === 'income' && it.amount < 1000); // 카드대금(이중 계산)·분기 이자 몇십 원은 기본 제외
     return { ...it, dup, on: !dup && !off };
   });
 }
@@ -463,7 +476,7 @@ function renderGoals() {
   view.innerHTML = `
     <section class="card">
       <div class="row"><h2>목표</h2><button class="btn sm" data-add-goal>＋</button></div>
-      <div class="row"><span class="muted">월 여유</span><b>${won(avg.net)}</b></div>
+      <div class="row"><span class="muted">월 저축 여력</span><b>${won(avg.net)}</b></div>
     </section>
     ${state.goals.length ? state.goals.map(g => goalCard(g, avg)).join('') : `<section class="card"><div class="empty">목표 없음</div></section>`}
   `;
@@ -709,10 +722,15 @@ function openSheet(html, onSubmit, onDelete) {
 }
 
 const catOptions = (type, selected) =>
-  (type === 'income' ? INCOME_CATS : EXPENSE_CATS).map(c => `<option ${c === selected ? 'selected' : ''}>${c}</option>`).join('');
+  (type === 'income' ? INCOME_CATS : type === 'saving' ? SAVING_CATS : EXPENSE_CATS).map(c => `<option ${c === selected ? 'selected' : ''}>${c}</option>`).join('');
 const typeSeg = type => `<div class="seg">
     <input type="radio" name="type" id="tExp" value="expense" ${type === 'expense' ? 'checked' : ''}><label for="tExp">지출</label>
     <input type="radio" name="type" id="tInc" value="income" ${type === 'income' ? 'checked' : ''}><label for="tInc">수입</label>
+  </div>`;
+const typeSeg3 = type => `<div class="seg seg3">
+    <input type="radio" name="type" id="tExp" value="expense" ${type === 'expense' ? 'checked' : ''}><label for="tExp">지출</label>
+    <input type="radio" name="type" id="tInc" value="income" ${type === 'income' ? 'checked' : ''}><label for="tInc">수입</label>
+    <input type="radio" name="type" id="tSav" value="saving" ${type === 'saving' ? 'checked' : ''}><label for="tSav">투자</label>
   </div>`;
 const moneyVal = n => (n ? Number(n).toLocaleString('ko-KR') : '');
 
@@ -737,9 +755,9 @@ function openTxSheet(t) {
 
 function openFixedSheet(f, type) {
   const isNew = !f;
-  f = f || { type: type || 'expense', name: '', amount: '', category: type === 'income' ? '급여' : '주거/관리비', day: '' };
+  f = f || { type: type || 'expense', name: '', amount: '', category: type === 'income' ? '급여' : type === 'saving' ? '주식·ETF' : '주거/관리비', day: '' };
   openSheet(`<h2>${isNew ? '고정 항목 추가' : '고정 항목 수정'}</h2>
-    ${typeSeg(f.type)}
+    ${typeSeg3(f.type)}
     <label>이름</label><input name="name" required value="${esc(f.name)}" placeholder="예: 월세, 넷플릭스, 월급" maxlength="30" />
     <label>월 금액</label><input name="amount" data-money inputmode="numeric" required value="${moneyVal(f.amount)}" placeholder="0" />
     <label>카테고리</label><select name="category">${catOptions(f.type, f.category)}</select>
@@ -924,7 +942,7 @@ function yearStats(y) {
   const byCat = {};
   cm.forEach(m => Object.entries(m.byCat).forEach(([k, v]) => { byCat[k] = (byCat[k] || 0) + v; }));
   return { y, months, counted: cm, income: add('income'), expense: add('expense'), fixedExpense: add('fixedExpense'),
-    varExpense: add('varExpense'), net: add('net'), byCat };
+    varExpense: add('varExpense'), net: add('net'), saving: add('saving'), left: add('left'), byCat };
 }
 const yearRange = ys => ys.counted.length ? (ys.counted.length === 1 ? `${Number(ys.counted[0].m.slice(5))}월` : `${Number(ys.counted[0].m.slice(5))}~${Number(ys.counted.at(-1).m.slice(5))}월`) : '기록 없음';
 
@@ -936,12 +954,13 @@ function renderYearHome() {
   view.innerHTML = `
     <section class="hero">
       <div class="hero-label">${ys.y}년 · ${yearRange(ys)}</div>
-      <div class="hero-amount ${ys.net < 0 ? 'neg' : ''}">${won(ys.net)}</div>
+      <div class="hero-amount ${ys.left < 0 ? 'neg' : ''}">${won(ys.left)}</div>
       <div class="hero-bar"><i style="width:${ys.income > 0 ? Math.min(100, pct(ys.expense, ys.income)) : 0}%"></i></div>
       <div class="hero-meta"><span>지출 ${ys.income > 0 ? pct(ys.expense, ys.income) : 0}%</span><span>저축률 ${ys.income > 0 ? rate + '%' : '–'}</span></div>
       <div class="hero-split">
         <div><span>수입</span><b>${won(ys.income)}</b></div>
         <div><span>지출</span><b>${won(ys.expense)}</b></div>
+        ${ys.saving ? `<div><span>투자</span><b>${won(ys.saving)}</b></div>` : ''}
       </div>
     </section>
     <section class="card">

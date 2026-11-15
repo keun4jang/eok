@@ -1,1 +1,1 @@
-window.EOK_VERSION = { n: 17, date: '2026.11.15' };
+window.EOK_VERSION = { n: 18, date: '2026.11.15' };

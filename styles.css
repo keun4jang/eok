@@ -350,3 +350,6 @@ details.tip > div { margin-top: 6px; font-size: 13px; color: var(--muted); }
 .ycol.dim .ylab { opacity: .45; }
 
 .h-sum { font-size: 14px; font-weight: 600; margin-left: 6px; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
+
+.hero-split { grid-template-columns: none; grid-auto-flow: column; grid-auto-columns: 1fr; }
+.seg.seg3 { grid-template-columns: 1fr 1fr 1fr; }
