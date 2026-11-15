@@ -287,6 +287,7 @@ function renderTx() {
       <input type="radio" name="txmode" id="mList" value="list" ${txMode === 'list' ? 'checked' : ''}><label for="mList">목록</label>
       <input type="radio" name="txmode" id="mCal" value="cal" ${txMode === 'cal' ? 'checked' : ''}><label for="mCal">달력</label>
     </div>
+    <div class="row" style="justify-content:flex-end;margin:-4px 0 6px"><button class="link-btn" data-month-sum>⇣ 월 합계</button></div>
     <button class="sms-cta" data-sms>
       <span class="cat-ic" style="--c:var(--gold)">✉</span>
       <span><b>문자·카톡 입력</b></span><span class="chev">›</span>
@@ -334,12 +335,13 @@ function renderFixed() {
   const now = ym(new Date());
   const active = activeFixed(now);
   const inc = active.filter(f => f.type === 'income');
-  const exp = active.filter(f => f.type === 'expense' && !f.until).sort((a, b) => b.amount - a.amount);
+  const exp = active.filter(f => f.type === 'expense' && !f.until && f.category !== '보험').sort((a, b) => b.amount - a.amount);
+  const ins = active.filter(f => f.type === 'expense' && !f.until && f.category === '보험').sort((a, b) => b.amount - a.amount);
   const inst = active.filter(f => f.type === 'expense' && f.until).sort((a, b) => a.until.localeCompare(b.until));
   const ended = state.fixed.filter(f => f.until && f.until < now);
   const sav = active.filter(f => f.type === 'saving').sort((a, b) => b.amount - a.amount);
   const billNow = billsTotal(now);
-  const expTotal = sum(exp) + sum(inst) + billNow, incTotal = sum(inc);
+  const expTotal = sum(exp) + sum(ins) + sum(inst) + billNow, incTotal = sum(inc);
   const endingSoon = sum(inst.filter(f => f.until === now));
   const item = f => `<li data-edit-fixed="${f.id}">
       <div class="li-main">${catIcon(f.category)}<div><div class="title">${esc(f.name)}</div><div class="sub">${esc(f.category)}${f.day ? ` · 매월 ${f.day}일` : ''}${f.until ? ` · ${untilLabel(f.until, now)}` : ''}</div></div></div>
@@ -364,6 +366,10 @@ function renderFixed() {
     <section class="card">
       <div class="row"><h2>지출 <span class="h-sum expense">${won(sum(exp))}</span></h2><button class="btn sm ghost" data-add-fixed="expense">＋</button></div>
       ${exp.length ? `<ul class="list">${exp.map(item).join('')}</ul>` : `<div class="empty">없음</div>`}
+    </section>
+    <section class="card">
+      <div class="row"><h2>보험 <span class="h-sum expense">${won(sum(ins))}</span></h2><button class="btn sm ghost" data-add-fixed="insurance">＋</button></div>
+      ${ins.length ? `<ul class="list">${ins.map(item).join('')}</ul>` : `<div class="empty">없음</div>`}
     </section>
     <section class="card">
       <div class="row"><h2>투자 <span class="h-sum income">${won(sum(sav))}</span></h2><button class="btn sm ghost" data-add-fixed="saving">＋</button></div>
@@ -766,9 +772,9 @@ function openTxSheet(t) {
     isNew ? null : () => { state.tx = state.tx.filter(x => x.id !== t.id); });
 }
 
-function openFixedSheet(f, type) {
+function openFixedSheet(f, type, cat) {
   const isNew = !f;
-  f = f || { type: type || 'expense', name: '', amount: '', category: type === 'income' ? '급여' : type === 'saving' ? '주식·ETF' : '주거/관리비', day: '' };
+  f = f || { type: type || 'expense', name: '', amount: '', category: cat || (type === 'income' ? '급여' : type === 'saving' ? '주식·ETF' : '주거/관리비'), day: '' };
   openSheet(`<h2>${isNew ? '고정 항목 추가' : '고정 항목 수정'}</h2>
     ${typeSeg3(f.type)}
     <label>이름</label><input name="name" required value="${esc(f.name)}" placeholder="예: 월세, 넷플릭스, 월급" maxlength="30" />
@@ -948,7 +954,7 @@ function toast(msg) {
 /* ===================== 공과금 ===================== */
 // 매달 금액이 달라지는 청구서(전기·가스·수도·관리비 등). 월별 기록(rec)과 납부 여부(paid)를 따로 관리.
 const BILL_CATS = ['전기', '가스', '수도', '관리비', '인터넷·TV', '기타'];
-const BILL_ICON = { 전기: '⚡', 가스: '🔥', 수도: '💧', 관리비: '🏢', '인터넷·TV': '📶', 기타: '🧾' };
+const BILL_ICON = { 전기: '⚡', 가스: '🔥', 수도: '💧', 관리비: '🏢', '인터넷·TV': '📶', 교통: '🚇', 기타: '🧾' };
 const BILL_KEY = { 전기: /한전|한국전력|전기/, 가스: /가스/, 수도: /수도|상하수도/, 관리비: /관리비|관리사무소|아파트/, '인터넷·TV': /인터넷|IPTV|수신료/, 기타: /$^/ };
 let fixedMode = 'fixed'; // 'fixed' | 'bills'
 
@@ -981,6 +987,7 @@ function renderBills() {
       ${totPrev ? `<div class="muted">지난달 ${won(totPrev)} ${tot >= totPrev ? '▲' : '▼'} ${won(Math.abs(tot - totPrev))}</div>` : ''}
     </section>
     ${cands.length ? `<button class="sms-cta" data-bill-migrate><span class="cat-ic" style="--c:var(--gold)">⇄</span><span><b>고정에서 옮기기 ${cands.length}</b><small>${cands.map(f => esc(f.name)).join(' · ')}</small></span><span class="chev">›</span></button>` : ''}
+    <button class="sms-cta" data-bill-import><span class="cat-ic" style="--c:var(--gold)">⇣</span><span><b>공과금 붙여넣기</b></span><span class="chev">›</span></button>
     <section class="card">
       <div class="row"><h2>공과금 <span class="h-sum expense">${won(tot)}</span></h2><button class="btn sm ghost" data-add-bill>＋</button></div>
       ${bills.length ? `<ul class="list">${bills.map(b => {
@@ -1039,6 +1046,110 @@ function openBillSheet(b) {
     form.querySelector('[name=amount]').value = moneyVal(b.rec?.[m]);
   });
   form.querySelector('[name=month]').addEventListener('change', e => { form.querySelector('[name=amount]').value = moneyVal(b.rec?.[e.target.value]); });
+}
+
+
+// 공과금 목록 붙여넣기: "| 이름 | 종류 | 납부일 | 월 | 금액 |" 표나 "전기요금 2026-09 78,700원" 줄을 월별 기록으로
+function parseBillList(text) {
+  const now = new Date(), out = new Map();
+  for (const raw of String(text).split('\n')) {
+    const line = raw.trim();
+    if (!line || /^\|?\s*:?-{2,}/.test(line) || /^#/.test(line)) continue;
+    const cells = line.includes('|') ? line.replace(/^\||\|$/g, '').split('|').map(c => c.replace(/\*\*/g, '').trim())
+      : line.includes('\t') ? line.split('\t').map(c => c.trim()) : null;
+    const all = cells ? cells.join(' ') : line;
+    let mm = all.match(/(20\d{2})\s*[.\-/년]\s*(\d{1,2})\s*월?/), y, m;
+    if (mm) { y = +mm[1]; m = +mm[2]; }
+    else if ((mm = all.match(/(\d{1,2})\s*월/))) { m = +mm[1]; y = now.getFullYear(); if (m > now.getMonth() + 1) y--; }
+    if (!m || m < 1 || m > 12) continue;
+    const amtCell = cells ? cells.find(c => /원|₩|^\d{1,3}(,\d{3})+$/.test(c) && !/월$/.test(c)) : line.replace(mm[0], ' '); // 날짜 숫자가 금액에 붙지 않게
+    const amount = amtCell ? SmsParser.parseKoreanAmount(amtCell) : 0;
+    if (!amount || amount > 5e6) continue;
+    let name = cells ? cells.find(c => c && !/\d{4}[.\-/년]|^\d{1,2}\s*월$|원|₩|^\d+일$|^\d[\d,]*$/.test(c) && !BILL_CATS.includes(c)) : line.split(/\s*\d/)[0];
+    name = String(name || '').replace(/\s*\([^)]*\)/g, '').trim();
+    if (!name || /^(이름|항목|종류|구분|합계|월|금액)/.test(name)) continue;
+    const cat = (cells && cells.find(c => BILL_CATS.includes(c))) || Object.keys(BILL_KEY).find(k => BILL_KEY[k].test(all)) || '기타';
+    const dm = cells ? cells.map(c => c.match(/^(\d{1,2})\s*일$/)).find(Boolean) : null;
+    const key = normName(name);
+    const b = out.get(key) || { name, cat, day: '', rec: {} };
+    if (dm && !b.day) b.day = +dm[1];
+    b.rec[`${y}-${String(m).padStart(2, '0')}`] = amount;
+    out.set(key, b);
+  }
+  return [...out.values()];
+}
+
+function openBillImportSheet(initialText = '') {
+  let found = [];
+  openSheet(`<h2>공과금 붙여넣기</h2>
+    <div class="row" style="margin-bottom:8px"><button type="button" class="btn sm ghost" data-act="clip">📋 붙여넣기</button><button type="button" class="link-btn" data-act="clear">지우기</button></div>
+    <textarea name="billText" rows="6" placeholder="| 이름 | 종류 | 납부일 | 월 | 금액 |&#10;| 전기요금 | 전기 | 17일 | 2026-09 | 78,700원 |"></textarea>
+    <div id="billPreview"></div>`,
+    () => {
+      if (!found.length) { alert('인식된 항목이 없어요'); return false; }
+      state.bills = state.bills || [];
+      let nb = 0, nr = 0;
+      for (const f of found) {
+        const ex = state.bills.find(b => normName(b.name) === normName(f.name));
+        if (ex) { ex.rec = { ...(ex.rec || {}), ...f.rec }; if (!ex.day && f.day) ex.day = f.day; }
+        else { state.bills.push({ id: uid(), name: f.name, cat: f.cat, day: f.day, rec: f.rec, paid: {} }); nb++; }
+        nr += Object.keys(f.rec).length;
+      }
+      setTimeout(() => toast(`공과금 ${nb ? `${nb}개 추가 · ` : ''}기록 ${nr}건`), 100);
+    });
+  const ta = form.querySelector('textarea'), submit = form.querySelector('button[type=submit]'), box = form.querySelector('#billPreview');
+  const update = () => {
+    found = parseBillList(ta.value);
+    submit.textContent = found.length ? `${found.length}개 등록` : '등록';
+    box.innerHTML = found.length ? `<ul class="list">${found.map(f => {
+      const ex = (state.bills || []).some(b => normName(b.name) === normName(f.name));
+      const ms = Object.keys(f.rec).sort();
+      return `<li><div class="li-main"><span class="cat-ic bill-ic">${BILL_ICON[f.cat] || '🧾'}</span><div><div class="title">${esc(f.name)} ${ex ? '<span class="pill">기존</span>' : ''}</div>
+        <div class="sub">${ms.map(m => `${Number(m.slice(5))}월 ${shortWon(f.rec[m])}`).join(' · ')}</div></div></div></li>`;
+    }).join('')}</ul>` : (ta.value.trim() ? '<div class="empty">인식 실패</div>' : '');
+  };
+  ta.addEventListener('input', update);
+  form.querySelector('[data-act=clear]').onclick = () => { ta.value = ''; update(); };
+  form.querySelector('[data-act=clip]').onclick = async () => { try { ta.value = await navigator.clipboard.readText(); update(); } catch { ta.focus(); } };
+  if (initialText) { ta.value = initialText; update(); }
+}
+
+// 과거 월 합계 → 내역(예: 주유·지하철·택시 월별 합계). 이번 달은 결제 문자로 건별 기록되므로 제외(이중 계산 방지)
+function openMonthSumSheet(initialText = '') {
+  let rows = [];
+  const cur = ym(new Date());
+  openSheet(`<h2>월 합계 붙여넣기</h2>
+    <div class="row" style="margin-bottom:8px"><button type="button" class="btn sm ghost" data-act="clip">📋 붙여넣기</button><button type="button" class="link-btn" data-act="clear">지우기</button></div>
+    <textarea name="sumText" rows="6" placeholder="| 항목 | 카테고리 | 월 | 금액 |&#10;| 주유 | 교통 | 2026-10 | 120,000원 |"></textarea>
+    <div id="sumPreview"></div>`,
+    () => {
+      if (!rows.length) { alert('인식된 항목이 없어요'); return false; }
+      for (const r of rows) {
+        const memo = `${r.name} (월합계)`;
+        state.tx = state.tx.filter(t => !(t.memo === memo && t.date.startsWith(r.m))); // 같은 월 합계는 덮어쓰기
+        state.tx.push({ id: uid(), type: 'expense', amount: r.amount, category: r.cat, memo, date: `${r.m}-28` });
+      }
+      setTimeout(() => toast(`월 합계 ${rows.length}건`), 100);
+    });
+  const ta = form.querySelector('textarea'), submit = form.querySelector('button[type=submit]'), box = form.querySelector('#sumPreview');
+  const update = () => {
+    const parsed = parseBillList(ta.value);
+    rows = [];
+    let skipped = 0;
+    for (const p of parsed) for (const [m, amount] of Object.entries(p.rec)) {
+      if (m >= cur) { skipped++; continue; }
+      const cat = EXPENSE_CATS.find(c => ta.value.split('\n').some(l => l.includes(p.name) && l.includes(c))) || SmsParser.guessCategory('expense', p.name, p.name);
+      rows.push({ name: p.name, m, amount, cat: /주유|기름|지하철|버스|택시|교통|후불/.test(p.name) ? '교통' : cat });
+    }
+    rows.sort((a, b) => a.m.localeCompare(b.m) || a.name.localeCompare(b.name));
+    submit.textContent = rows.length ? `${rows.length}건 등록` : '등록';
+    box.innerHTML = rows.length ? `${skipped ? `<div class="hint">이번 달 ${skipped}건 제외 (문자로 기록)</div>` : ''}<table class="mini">${rows.map(r =>
+      `<tr><td>${Number(r.m.slice(5))}월 · ${esc(r.name)} <span class="muted">${esc(r.cat)}</span></td><td>${won(r.amount)}</td></tr>`).join('')}</table>` : (ta.value.trim() ? '<div class="empty">인식 실패</div>' : '');
+  };
+  ta.addEventListener('input', update);
+  form.querySelector('[data-act=clear]').onclick = () => { ta.value = ''; update(); };
+  form.querySelector('[data-act=clip]').onclick = async () => { try { ta.value = await navigator.clipboard.readText(); update(); } catch { ta.focus(); } };
+  if (initialText) { ta.value = initialText; update(); }
 }
 
 function migrateBills() {
@@ -1192,9 +1303,11 @@ $('#monthLabel').onclick = () => openPicker();
 $('#fab').onclick = () => openTxSheet();
 
 view.addEventListener('click', e => {
-  const el = e.target.closest('[data-bill-paid],[data-bill],[data-add-bill],[data-bill-migrate],[data-open-month],[data-import-fixed],[data-clear-ended],[data-sms],[data-day],[data-clear-day],[data-edit-tx],[data-edit-fixed],[data-add-fixed],[data-edit-goal],[data-add-goal],[data-goto],#exportBtn,#importBtn,#resetBtn,#updateBtn,#loginBtn,#logoutBtn,#syncBtn,#dropBtn,[data-copy]');
+  const el = e.target.closest('[data-month-sum],[data-bill-import],[data-bill-paid],[data-bill],[data-add-bill],[data-bill-migrate],[data-open-month],[data-import-fixed],[data-clear-ended],[data-sms],[data-day],[data-clear-day],[data-edit-tx],[data-edit-fixed],[data-add-fixed],[data-edit-goal],[data-add-goal],[data-goto],#exportBtn,#importBtn,#resetBtn,#updateBtn,#loginBtn,#logoutBtn,#syncBtn,#dropBtn,[data-copy]');
   if (!el) return;
-  if (el.dataset.billPaid) { const b = state.bills.find(x => x.id === el.dataset.billPaid), m = ym(new Date()); b.paid = { ...(b.paid || {}), [m]: !b.paid?.[m] }; save(); render(); }
+  if ('monthSum' in el.dataset) openMonthSumSheet();
+  else if ('billImport' in el.dataset) openBillImportSheet();
+  else if (el.dataset.billPaid) { const b = state.bills.find(x => x.id === el.dataset.billPaid), m = ym(new Date()); b.paid = { ...(b.paid || {}), [m]: !b.paid?.[m] }; save(); render(); }
   else if (el.dataset.bill) openBillSheet(state.bills.find(x => x.id === el.dataset.bill));
   else if ('addBill' in el.dataset) openBillSheet();
   else if ('billMigrate' in el.dataset) migrateBills();
@@ -1209,6 +1322,7 @@ view.addEventListener('click', e => {
   else if ('clearDay' in el.dataset) { selectedDay = null; render(); }
   else if (el.dataset.editTx) openTxSheet(state.tx.find(t => t.id === el.dataset.editTx));
   else if (el.dataset.editFixed) openFixedSheet(state.fixed.find(f => f.id === el.dataset.editFixed));
+  else if (el.dataset.addFixed === 'insurance') openFixedSheet(null, 'expense', '보험');
   else if (el.dataset.addFixed) openFixedSheet(null, el.dataset.addFixed);
   else if (el.dataset.editGoal) openGoalSheet(state.goals.find(g => g.id === el.dataset.editGoal));
   else if ('addGoal' in el.dataset) openGoalSheet();
@@ -1272,6 +1386,10 @@ function handleSharedText() {
   // 고정 항목 목록 링크 (확인 후 등록). # 뒤에 담으면 서버(GitHub)로 전송되지 않는다.
   const h = new URLSearchParams(location.hash.slice(1));
   const fixedList = (h.get('fixed') || q.get('fixed') || '').trim();
+  const billList = (h.get('bills') || '').trim();
+  const sumList = (h.get('monthsum') || '').trim();
+  if (sumList) { history.replaceState(null, '', location.pathname); currentTab = 'tx'; render(); openMonthSumSheet(sumList); return; }
+  if (billList) { history.replaceState(null, '', location.pathname); currentTab = 'fixed'; fixedMode = 'bills'; render(); openBillImportSheet(billList); return; }
   const shared = [q.get('title'), q.get('text'), q.get('url')].filter(Boolean).join('\n').trim();
   if (!shared && !fixedList) return;
   history.replaceState(null, '', location.pathname); // # 부분까지 지움 // 새로고침 시 중복 입력 방지
