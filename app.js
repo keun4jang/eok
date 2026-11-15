@@ -24,6 +24,7 @@ const defaultState = () => ({
   tx: [],      // {id, type:'income'|'expense', amount, category, memo, date:'YYYY-MM-DD'}
   fixed: [],   // {id, type, name, amount, category, day}
   goals: [],   // {id, name, target, saved, deadline:'YYYY-MM', rate}
+  bills: [],   // 공과금 {id, name, cat, day, rec:{'YYYY-MM': 금액}, paid:{'YYYY-MM': true}}
   settings: { emergency: 0, highDebt: false },
   merchantCats: {}, // 가맹점 → 사용자가 고른 카테고리 (문자 입력 시 학습)
 });
@@ -96,13 +97,14 @@ function monthStats(m) {
   const varExpense = sum(txs.filter(t => t.type === 'expense'));
   const fx = activeFixed(m);
   const fixedIncome = sum(fx.filter(f => f.type === 'income'));
-  const fixedExpense = sum(fx.filter(f => f.type === 'expense'));
-  const saving = sum(fx.filter(f => f.type === 'saving')); // 고정 투자·저축: 지출 아님, 남는 돈에서만 뺌
+  const fixedExpense = sum(fx.filter(f => f.type === 'expense')) + billsTotal(m);
+  const saving = sum(fx.filter(f => f.type === 'saving'));
+  const bills = billsTotal(m); // 공과금(월별 기록·추정)은 고정지출에 포함 // 고정 투자·저축: 지출 아님, 남는 돈에서만 뺌
   const byCat = {};
   txs.filter(t => t.type === 'expense').forEach(t => { byCat[t.category] = (byCat[t.category] || 0) + t.amount; });
   const income = varIncome + fixedIncome;
   const expense = varExpense + fixedExpense;
-  return { m, txs, income, expense, varIncome, varExpense, fixedIncome, fixedExpense, saving, byCat, net: income - expense, left: income - expense - saving, txCount: txs.length };
+  return { m, txs, income, expense, varIncome, varExpense, fixedIncome, fixedExpense, saving, bills, byCat, net: income - expense, left: income - expense - saving, txCount: txs.length };
 }
 function sum(arr) { return arr.reduce((a, b) => a + (Number(b.amount) || 0), 0); }
 
@@ -328,6 +330,7 @@ function calendar(s) {
 }
 
 function renderFixed() {
+  if (fixedMode === 'bills') return renderBills();
   const now = ym(new Date());
   const active = activeFixed(now);
   const inc = active.filter(f => f.type === 'income');
@@ -335,16 +338,18 @@ function renderFixed() {
   const inst = active.filter(f => f.type === 'expense' && f.until).sort((a, b) => a.until.localeCompare(b.until));
   const ended = state.fixed.filter(f => f.until && f.until < now);
   const sav = active.filter(f => f.type === 'saving').sort((a, b) => b.amount - a.amount);
-  const expTotal = sum(exp) + sum(inst), incTotal = sum(inc);
+  const billNow = billsTotal(now);
+  const expTotal = sum(exp) + sum(inst) + billNow, incTotal = sum(inc);
   const endingSoon = sum(inst.filter(f => f.until === now));
   const item = f => `<li data-edit-fixed="${f.id}">
       <div class="li-main">${catIcon(f.category)}<div><div class="title">${esc(f.name)}</div><div class="sub">${esc(f.category)}${f.day ? ` · 매월 ${f.day}일` : ''}${f.until ? ` · ${untilLabel(f.until, now)}` : ''}</div></div></div>
       <div class="amount ${f.type}">${won(f.amount)}</div></li>`;
   view.innerHTML = `
+    ${fixedSeg()}
     <section class="card">
       <div class="muted">이번 달 고정지출</div>
       <div class="big expense">${won(expTotal)}</div>
-      <div class="muted">${incTotal ? `수입 대비 ${pct(expTotal, incTotal)}%` : '수입 미등록'}${inst.length ? ` · 할부 ${won(sum(inst))}` : ''}</div>
+      <div class="muted">${incTotal ? `수입 대비 ${pct(expTotal, incTotal)}%` : '수입 미등록'}${inst.length ? ` · 할부 ${won(sum(inst))}` : ''}${billNow ? ` · 공과금 ${won(billNow)}` : ''}</div>
       ${sav.length ? `<div class="muted">투자 ${won(sum(sav))} · 남는 돈 ${won(incTotal - expTotal - sum(sav))}</div>` : ''}
       ${endingSoon ? `<div class="muted">다음 달 −${won(endingSoon)} (할부 끝)</div>` : ''}
     </section>
@@ -607,6 +612,7 @@ function ingest(texts) {
   for (const it of items) {
     if (!it.on) continue;
     if (it.type === 'cancel') { if (it.cancelTarget) { state.tx = state.tx.filter(t => t.id !== it.cancelTarget); removed++; } continue; }
+    if (it.billId && recordBill(it)) { added++; continue; }
     state.tx.push({ id: uid(), type: it.type, amount: it.amount, category: it.category, memo: it.memo.trim(), date: it.date, auto: true });
     added++;
   }
@@ -664,6 +670,12 @@ function buildTips(avg) {
     tips.push({ title: `1만원 미만 소액 결제 월 ${Math.round(small.length / months)}건 · 월 ${won(sum(small) / months)}`, body: '하나하나는 작아도 합치면 큽니다. 편의점·간식·앱 결제가 주로 어디서 나오는지 확인해보세요.' });
   }
 
+  // 공과금이 평소(최근 기록 평균)보다 25% 이상 많을 때
+  for (const b of state.bills || []) {
+    const m = ym(new Date()), v = b.rec?.[m], avgB = billAvg(b, m);
+    if (v && avgB && v > avgB * 1.25) tips.push({ level: 'warn', title: `${BILL_ICON[b.cat] || ''} ${b.name} +${pct(v - avgB, avgB)}%`, body: `평소 ${won(avgB)} → 이번 달 ${won(v)}` });
+  }
+
   // 이번 달 vs 평균 급증 카테고리
   const cur = monthStats(now);
   const prevAvg = (() => {
@@ -718,7 +730,8 @@ function openSheet(html, onSubmit, onDelete) {
   }));
   sheet.showModal();
   const first = form.querySelector('[data-money]');
-  if (first && !first.value) setTimeout(() => first.focus(), 50);
+  // 이미 다른 칸을 누르고 입력 중이면 커서를 뺏지 않는다(뺏으면 입력이 금액 칸으로 들어감)
+  if (first && !first.value) setTimeout(() => { if (!form.contains(document.activeElement) || document.activeElement === form) first.focus(); }, 50);
 }
 
 const catOptions = (type, selected) =>
@@ -853,8 +866,9 @@ function smsItemsFrom(results) {
     const fixedHit = type === 'expense' && state.fixed.find(f => f.type === 'expense' &&
       Math.abs(f.amount - r.amount) <= f.amount * 0.05 &&
       (normName(f.name).slice(0, 2) === normName(memo).slice(0, 2) || (f.day && Math.abs(Number(r.date.slice(8)) - f.day) <= 2)));
-    return { type, amount: r.amount, date: r.date, memo, category, dup, fixedHit: fixedHit ? fixedHit.name : '', cancelTarget,
-      on: type === 'cancel' ? !!cancelTarget : !dup && !fixedHit };
+    const bill = type === 'expense' ? billMatch(memo) : null;
+    return { type, amount: r.amount, date: r.date, memo, category, dup, fixedHit: fixedHit ? fixedHit.name : '', billId: bill?.id || '', billName: bill?.name || '', cancelTarget,
+      on: type === 'cancel' ? !!cancelTarget : !dup && (!fixedHit || !!bill) };
   });
 }
 function findCancelTarget(amount, memo, date) {
@@ -880,10 +894,10 @@ function renderSmsPreview() {
       <div class="row">
         <label class="chk"><input type="checkbox" data-f="on" ${it.on ? 'checked' : ''}>
           <span class="pill ${it.type === 'income' ? 'ok' : it.type === 'cancel' ? 'bad' : ''}">${it.type === 'income' ? '수입' : it.type === 'cancel' ? '취소' : '지출'}</span>
-          ${it.dup ? '<span class="pill bad">이미 있음?</span>' : ''}${it.fixedHit ? '<span class="pill bad">고정 항목</span>' : ''}</label>
+          ${it.dup ? '<span class="pill bad">이미 있음?</span>' : ''}${it.billId ? '<span class="pill ok">공과금</span>' : it.fixedHit ? '<span class="pill bad">고정 항목</span>' : ''}</label>
         <input class="amt ${it.type}" data-f="amount" inputmode="numeric" value="${moneyVal(it.amount)}">
       </div>
-      ${it.fixedHit ? `<div class="hint">= ${esc(it.fixedHit)}</div>` : ''}
+      ${it.billId ? `<div class="hint">→ ${esc(it.billName)} ${Number(it.date.slice(5, 7))}월</div>` : it.fixedHit ? `<div class="hint">= ${esc(it.fixedHit)}</div>` : ''}
       ${it.type === 'cancel'
         ? `<div class="hint">${it.cancelTarget ? '원 결제 삭제' : '원 결제 없음'}</div>`
         : `<div class="sms-fields">
@@ -895,6 +909,13 @@ function renderSmsPreview() {
   form.querySelector('button[type=submit]').textContent = saveLabel();
 }
 
+// 공과금 결제 → 그 달 공과금 기록(+납부 체크). 내역에는 넣지 않음(이중 계산 방지)
+function recordBill(it) {
+  const b = state.bills.find(x => x.id === it.billId); if (!b) return false;
+  const m = it.date.slice(0, 7);
+  b.rec = { ...(b.rec || {}), [m]: it.amount }; b.paid = { ...(b.paid || {}), [m]: true };
+  return true;
+}
 function saveSmsItems() {
   const picked = smsItems.filter(x => x.on && x.amount > 0);
   if (!picked.length) { alert('저장할 항목을 선택하세요'); return false; }
@@ -905,6 +926,7 @@ function saveSmsItems() {
       if (it.cancelTarget) { state.tx = state.tx.filter(t => t.id !== it.cancelTarget); removed++; }
       continue;
     }
+    if (it.billId && recordBill(it)) { added++; continue; }
     state.tx.push({ id: uid(), type: it.type, amount: it.amount, category: it.category, memo: it.memo.trim(), date: it.date });
     if (it.memo.trim()) state.merchantCats[it.memo.trim()] = it.category; // 다음에 같은 가맹점이면 이 카테고리로
     added++;
@@ -921,6 +943,117 @@ function toast(msg) {
   setTimeout(() => el.remove(), 2200);
 }
 
+
+
+/* ===================== 공과금 ===================== */
+// 매달 금액이 달라지는 청구서(전기·가스·수도·관리비 등). 월별 기록(rec)과 납부 여부(paid)를 따로 관리.
+const BILL_CATS = ['전기', '가스', '수도', '관리비', '인터넷·TV', '기타'];
+const BILL_ICON = { 전기: '⚡', 가스: '🔥', 수도: '💧', 관리비: '🏢', '인터넷·TV': '📶', 기타: '🧾' };
+const BILL_KEY = { 전기: /한전|한국전력|전기/, 가스: /가스/, 수도: /수도|상하수도/, 관리비: /관리비|관리사무소|아파트/, '인터넷·TV': /인터넷|IPTV|수신료/, 기타: /$^/ };
+let fixedMode = 'fixed'; // 'fixed' | 'bills'
+
+// 그 달 금액: 기록이 있으면 기록, 없고 이번 달 이후면 가장 최근 기록으로 추정, 지난 달이면 0
+function billAmount(b, m) {
+  if (b.rec?.[m] != null) return { v: b.rec[m], est: false };
+  if (m < ym(new Date())) return { v: 0, est: false };
+  const last = Object.keys(b.rec || {}).filter(k => k < m).sort().pop();
+  return { v: last ? b.rec[last] : 0, est: !!last };
+}
+const billsTotal = m => (state.bills || []).reduce((a, b) => a + billAmount(b, m).v, 0);
+function billAvg(b, before) {
+  const ks = Object.keys(b.rec || {}).filter(k => !before || k < before).sort().slice(-6);
+  return ks.length ? Math.round(ks.reduce((a, k) => a + b.rec[k], 0) / ks.length) : 0;
+}
+const billMatch = memo => (state.bills || []).find(b => normName(memo).includes(normName(b.name)) || BILL_KEY[b.cat]?.test(memo));
+const billCandidates = () => state.fixed.filter(f => f.type === 'expense' && !f.until && /가스|전기|한전|수도|관리비|관리/.test(f.name));
+
+function renderBills() {
+  const now = ym(new Date()), prev = shiftMonth(now, -1);
+  const bills = state.bills || [];
+  const tot = billsTotal(now), totPrev = billsTotal(prev);
+  const anyEst = bills.some(b => billAmount(b, now).est);
+  const cands = billCandidates();
+  view.innerHTML = `
+    ${fixedSeg()}
+    <section class="card">
+      <div class="muted">이번 달 공과금${anyEst ? ' · 추정 포함' : ''}</div>
+      <div class="big expense">${won(tot)}</div>
+      ${totPrev ? `<div class="muted">지난달 ${won(totPrev)} ${tot >= totPrev ? '▲' : '▼'} ${won(Math.abs(tot - totPrev))}</div>` : ''}
+    </section>
+    ${cands.length ? `<button class="sms-cta" data-bill-migrate><span class="cat-ic" style="--c:var(--gold)">⇄</span><span><b>고정에서 옮기기 ${cands.length}</b><small>${cands.map(f => esc(f.name)).join(' · ')}</small></span><span class="chev">›</span></button>` : ''}
+    <section class="card">
+      <div class="row"><h2>공과금 <span class="h-sum expense">${won(tot)}</span></h2><button class="btn sm ghost" data-add-bill>＋</button></div>
+      ${bills.length ? `<ul class="list">${bills.map(b => {
+        const a = billAmount(b, now), p = billAmount(b, prev).v, avg = billAvg(b);
+        const diff = !a.est && p ? Math.round((a.v - p) / p * 100) : null;
+        return `<li data-bill="${b.id}">
+          <div class="li-main"><span class="cat-ic bill-ic">${BILL_ICON[b.cat] || '🧾'}</span>
+            <div><div class="title">${esc(b.name)}</div><div class="sub">${b.day ? `${b.day}일` : ''}${avg ? `${b.day ? ' · ' : ''}평균 ${shortWon(avg)}` : ''}</div></div></div>
+          <div class="bill-right">
+            <div class="amount ${a.est ? 'muted' : 'expense'}">${a.v ? won(a.v) : '–'}${a.est ? '<small> 추정</small>' : ''}</div>
+            <div class="sub">${diff != null ? `<span class="${diff > 0 ? 'expense' : 'income'}">${diff > 0 ? '▲' : '▼'}${Math.abs(diff)}%</span>` : ''}
+              <button class="paid ${b.paid?.[now] ? 'on' : ''}" data-bill-paid="${b.id}">${b.paid?.[now] ? '✓ 납부' : '미납'}</button></div>
+          </div></li>`;
+      }).join('')}</ul>` : `<div class="empty">없음</div>`}
+    </section>`;
+}
+const fixedSeg = () => `<div class="seg view-seg">
+    <input type="radio" name="fxmode" id="fxF" value="fixed" ${fixedMode === 'fixed' ? 'checked' : ''}><label for="fxF">고정</label>
+    <input type="radio" name="fxmode" id="fxB" value="bills" ${fixedMode === 'bills' ? 'checked' : ''}><label for="fxB">공과금</label>
+  </div>`;
+
+function openBillSheet(b) {
+  const isNew = !b;
+  b = b || { name: '', cat: '전기', day: '', rec: {}, paid: {} };
+  const now = ym(new Date());
+  const months = Array.from({ length: 12 }, (_, i) => shiftMonth(now, -i));
+  const max = Math.max(1, ...months.map(m => b.rec?.[m] || 0));
+  openSheet(`<h2>${isNew ? '공과금 추가' : esc(b.name)}</h2>
+    <div class="grid2">
+      <div><label>이름</label><input name="name" required value="${esc(b.name)}" placeholder="예: 전기요금" maxlength="20"></div>
+      <div><label>종류</label><select name="cat">${BILL_CATS.map(c => `<option ${c === b.cat ? 'selected' : ''}>${c}</option>`).join('')}</select></div>
+    </div>
+    <div class="grid2">
+      <div><label>월</label><input name="month" type="month" value="${now}"></div>
+      <div><label>금액</label><input name="amount" data-money inputmode="numeric" value="${moneyVal(b.rec?.[now])}" placeholder="0"></div>
+    </div>
+    <label>납부일</label><input name="day" type="number" min="1" max="31" value="${b.day || ''}">
+    ${isNew ? '' : `<h3>최근 12개월 · 평균 ${won(billAvg(b))}</h3>
+      <div class="bill-hist">${months.slice().reverse().map(m => `
+        <button type="button" class="bh ${b.rec?.[m] != null ? '' : 'empty'}" data-bh="${m}" title="${m}">
+          <i style="height:${Math.round((b.rec?.[m] || 0) / max * 100)}%"></i><span>${Number(m.slice(5))}</span></button>`).join('')}</div>`}`,
+    fd => {
+      if (!fd.name.trim()) { alert('이름을 입력하세요'); return false; }
+      const amt = parseAmount(fd.amount);
+      const rec = { ...(b.rec || {}) };
+      if (fd.month) { if (amt) rec[fd.month] = amt; else delete rec[fd.month]; }
+      const nb = { id: b.id || uid(), name: fd.name.trim(), cat: fd.cat, day: Number(fd.day) || '', rec, paid: { ...(b.paid || {}) } };
+      state.bills = state.bills || [];
+      if (isNew) state.bills.push(nb); else state.bills[state.bills.findIndex(x => x.id === b.id)] = nb;
+    },
+    isNew ? null : () => { state.bills = state.bills.filter(x => x.id !== b.id); });
+  // 막대 누르면 그 달 금액을 불러와 수정
+  form.querySelectorAll('[data-bh]').forEach(btn => btn.onclick = () => {
+    const m = btn.dataset.bh;
+    form.querySelector('[name=month]').value = m;
+    form.querySelector('[name=amount]').value = moneyVal(b.rec?.[m]);
+  });
+  form.querySelector('[name=month]').addEventListener('change', e => { form.querySelector('[name=amount]').value = moneyVal(b.rec?.[e.target.value]); });
+}
+
+function migrateBills() {
+  const cands = billCandidates();
+  if (!cands.length || !confirm(`${cands.map(f => f.name).join(', ')}\n공과금으로 옮길까요?`)) return;
+  const now = ym(new Date());
+  state.bills = state.bills || [];
+  for (const f of cands) {
+    const cat = /전기|한전/.test(f.name) ? '전기' : /가스/.test(f.name) ? '가스' : /수도/.test(f.name) ? '수도' : '관리비';
+    state.bills.push({ id: uid(), name: f.name, cat, day: f.day || '', rec: { [now]: f.amount }, paid: {} });
+  }
+  const ids = new Set(cands.map(f => f.id));
+  state.fixed = state.fixed.filter(f => !ids.has(f.id));
+  save(); render(); toast(`공과금 ${cands.length}건`);
+}
 
 /* ===================== 연간 보기 + 월/연 선택 ===================== */
 // 기록 시작 월: 첫 거래 월과 고정 항목을 처음 저장한 월 중 이른 쪽.
@@ -1059,9 +1192,13 @@ $('#monthLabel').onclick = () => openPicker();
 $('#fab').onclick = () => openTxSheet();
 
 view.addEventListener('click', e => {
-  const el = e.target.closest('[data-open-month],[data-import-fixed],[data-clear-ended],[data-sms],[data-day],[data-clear-day],[data-edit-tx],[data-edit-fixed],[data-add-fixed],[data-edit-goal],[data-add-goal],[data-goto],#exportBtn,#importBtn,#resetBtn,#updateBtn,#loginBtn,#logoutBtn,#syncBtn,#dropBtn,[data-copy]');
+  const el = e.target.closest('[data-bill-paid],[data-bill],[data-add-bill],[data-bill-migrate],[data-open-month],[data-import-fixed],[data-clear-ended],[data-sms],[data-day],[data-clear-day],[data-edit-tx],[data-edit-fixed],[data-add-fixed],[data-edit-goal],[data-add-goal],[data-goto],#exportBtn,#importBtn,#resetBtn,#updateBtn,#loginBtn,#logoutBtn,#syncBtn,#dropBtn,[data-copy]');
   if (!el) return;
-  if (el.dataset.openMonth) { viewMode = 'month'; viewMonth = el.dataset.openMonth; selectedDay = null; render(); window.scrollTo(0, 0); }
+  if (el.dataset.billPaid) { const b = state.bills.find(x => x.id === el.dataset.billPaid), m = ym(new Date()); b.paid = { ...(b.paid || {}), [m]: !b.paid?.[m] }; save(); render(); }
+  else if (el.dataset.bill) openBillSheet(state.bills.find(x => x.id === el.dataset.bill));
+  else if ('addBill' in el.dataset) openBillSheet();
+  else if ('billMigrate' in el.dataset) migrateBills();
+  else if (el.dataset.openMonth) { viewMode = 'month'; viewMonth = el.dataset.openMonth; selectedDay = null; render(); window.scrollTo(0, 0); }
   else if ('importFixed' in el.dataset) openFixedImportSheet();
   else if ('clearEnded' in el.dataset) {
     const now = ym(new Date());
@@ -1097,6 +1234,7 @@ view.addEventListener('click', e => {
   }
 });
 view.addEventListener('change', e => {
+  if (e.target.name === 'fxmode') { fixedMode = e.target.value; render(); return; }
   if (e.target.name === 'txmode') { txMode = e.target.value; selectedDay = null; render(); return; }
   if (e.target.id === 'setEmergency') { state.settings.emergency = parseAmount(e.target.value); save(); render(); }
   if (e.target.id === 'setDebt') { state.settings.highDebt = e.target.checked; save(); render(); }
