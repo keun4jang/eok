@@ -24,6 +24,7 @@ const defaultState = () => ({
   tx: [],      // {id, type:'income'|'expense', amount, category, memo, date:'YYYY-MM-DD'}
   fixed: [],   // {id, type, name, amount, category, day}
   goals: [],   // {id, name, target, saved, deadline:'YYYY-MM', rate}
+  assets: [],  // 자산 {id, name, kind, balance, monthly, day, match, accruedTo, updated}
   bills: [],   // 공과금 {id, name, cat, day, rec:{'YYYY-MM': 금액}, paid:{'YYYY-MM': true}}
   settings: { emergency: 0, highDebt: false },
   merchantCats: {}, // 가맹점 → 사용자가 고른 카테고리 (문자 입력 시 학습)
@@ -488,6 +489,7 @@ function saveFixedItems() {
 function renderGoals() {
   const avg = avgStats();
   view.innerHTML = `
+    ${assetsHtml()}
     <section class="card">
       <div class="row"><h2>목표</h2><button class="btn sm" data-add-goal>＋</button></div>
       <div class="row"><span class="muted">월 저축 여력</span><b>${won(avg.net)}</b></div>
@@ -675,6 +677,7 @@ function refreshAccount() {
 function ingest(texts) {
   const items = buildSmsItems(texts.join('\n\n'));
   let added = 0, removed = 0;
+  const balUp = items.map(applyBalance).filter(Boolean).length; if (balUp) syncLinkedGoals();
   for (const it of items) {
     if (!it.on) continue;
     if (it.type === 'cancel') { if (it.cancelTarget) { state.tx = state.tx.filter(t => t.id !== it.cancelTarget); removed++; } continue; }
@@ -682,7 +685,7 @@ function ingest(texts) {
     state.tx.push({ id: uid(), type: it.type, amount: it.amount, category: it.category, memo: it.memo.trim(), date: it.date, auto: true });
     added++;
   }
-  if (added || removed) { save(); if (!sheet.open) render(); }
+  if (added || removed || balUp) { save(); if (!sheet.open) render(); }
   toast(`자동 ${added}건 등록${removed ? ` · 취소 ${removed}` : ''}`);
 }
 window.EokApp = { getState: () => state, adopt, refreshAccount, ingest };
@@ -858,14 +861,16 @@ function openGoalSheet(g) {
     <label>목표 이름</label><input name="name" required value="${esc(g.name)}" placeholder="예: 전세 보증금, 비상금, 여행" maxlength="30" />
     <label>목표 금액</label><input name="target" data-money inputmode="numeric" required value="${moneyVal(g.target)}" />
     <label>현재 모은 금액</label><input name="saved" data-money inputmode="numeric" value="${moneyVal(g.saved)}" placeholder="0" />
+    <label style="display:flex;align-items:center;gap:8px;color:var(--text)"><input type="checkbox" name="link" value="net" style="width:auto" ${g.link === 'net' ? 'checked' : ''}/> 총 자산(순자산)과 연동</label>
     <label>목표 시점</label><input name="deadline" type="month" required value="${g.deadline}" min="${shiftMonth(ym(new Date()), 1)}" />
     <label>연수익률 %</label><input name="rate" type="number" step="0.1" min="0" max="20" value="${g.rate}" />
     <div class="hint">예금 2~3 · 주식 4~6</div>`,
     fd => {
       const target = parseAmount(fd.target);
       if (!target || !fd.name.trim()) { alert('이름과 목표 금액을 입력하세요'); return false; }
-      const rec = { id: g.id || uid(), name: fd.name.trim(), target, saved: parseAmount(fd.saved), deadline: fd.deadline, rate: Math.max(0, Number(fd.rate) || 0) };
+      const rec = { id: g.id || uid(), name: fd.name.trim(), target, saved: parseAmount(fd.saved), deadline: fd.deadline, rate: Math.max(0, Number(fd.rate) || 0), ...(fd.link ? { link: 'net' } : {}) };
       if (isNew) state.goals.push(rec); else state.goals[state.goals.findIndex(x => x.id === g.id)] = rec;
+      syncLinkedGoals();
     },
     isNew ? null : () => { state.goals = state.goals.filter(x => x.id !== g.id); });
 }
@@ -933,7 +938,8 @@ function smsItemsFrom(results) {
       Math.abs(f.amount - r.amount) <= f.amount * 0.05 &&
       (normName(f.name).slice(0, 2) === normName(memo).slice(0, 2) || (f.day && Math.abs(Number(r.date.slice(8)) - f.day) <= 2)));
     const bill = type === 'expense' ? billMatch(memo) : null;
-    return { type, amount: r.amount, date: r.date, memo, category, dup, fixedHit: fixedHit ? fixedHit.name : '', billId: bill?.id || '', billName: bill?.name || '', cancelTarget,
+    const extra = { balance: r.balance ?? null, raw: r.raw || '' };
+    return { type, amount: r.amount, date: r.date, memo, category, dup, fixedHit: fixedHit ? fixedHit.name : '', billId: bill?.id || '', billName: bill?.name || '', ...extra, cancelTarget,
       on: type === 'cancel' ? !!cancelTarget : !dup && (!fixedHit || !!bill) };
   });
 }
@@ -987,6 +993,7 @@ function saveSmsItems() {
   if (!picked.length) { alert('저장할 항목을 선택하세요'); return false; }
   state.merchantCats = state.merchantCats || {};
   let added = 0, removed = 0;
+  smsItems.forEach(applyBalance); syncLinkedGoals(); // 잔액 알림은 체크 여부와 상관없이 반영
   for (const it of picked) {
     if (it.type === 'cancel') {
       if (it.cancelTarget) { state.tx = state.tx.filter(t => t.id !== it.cancelTarget); removed++; }
@@ -1233,6 +1240,106 @@ function migrateBills() {
   save(); render(); toast(`공과금 ${cands.length}건`);
 }
 
+
+/* ===================== 자산 ===================== */
+// 개인 웹앱은 은행·증권 잔액을 직접 못 읽는다(마이데이터 허가 필요). 대신:
+//  ① 입출금 알림의 "잔액"으로 연결된 계좌 잔액 자동 갱신 ② 매월 적립액 자동 가산(추정) ③ 매일 총자산 기록
+const ASSET_KINDS = ['현금', '예적금', '투자', '코인', '보증금', '기타자산', '부채'];
+const ASSET_ICON = { 현금: '💵', 예적금: '🏦', 투자: '📈', 코인: '🪙', 보증금: '🏠', 기타자산: '💎', 부채: '💳' };
+function assetTotals() {
+  const a = state.assets || [];
+  const debt = a.filter(x => x.kind === '부채').reduce((s, x) => s + (x.balance || 0), 0);
+  const fin = a.filter(x => !['부채', '보증금'].includes(x.kind)).reduce((s, x) => s + (x.balance || 0), 0);
+  const all = a.filter(x => x.kind !== '부채').reduce((s, x) => s + (x.balance || 0), 0);
+  return { fin, debt, net: all - debt };
+}
+// 매월 자동 적립: 적립일이 지난 달마다 한 번씩 더함(accruedTo = 마지막으로 더한 달)
+function autoAccrue() {
+  const now = new Date(), cur = ym(now); let changed = false;
+  for (const a of state.assets || []) {
+    if (!a.monthly || !a.accruedTo) continue;
+    let m = shiftMonth(a.accruedTo, 1);
+    while (m < cur || (m === cur && now.getDate() >= (a.day || 1))) {
+      a.balance = (a.balance || 0) + a.monthly; a.accruedTo = m; a.updated = todayStr(); changed = true;
+      m = shiftMonth(m, 1);
+    }
+  }
+  return changed;
+}
+function syncLinkedGoals() {
+  const { net } = assetTotals(); let changed = false;
+  for (const g of state.goals) if (g.link === 'net' && (state.assets || []).length && g.saved !== net) { g.saved = net; changed = true; }
+  return changed;
+}
+function snapshotDaily() {
+  if (!(state.assets || []).length) return false;
+  const t = todayStr(), { net, fin } = assetTotals();
+  const h = state.settings.netHist || {};
+  if (h[t]?.net === net && h[t]?.fin === fin) return false;
+  h[t] = { net, fin };
+  const keys = Object.keys(h).sort(); keys.slice(0, Math.max(0, keys.length - 400)).forEach(k => delete h[k]);
+  state.settings.netHist = h; return true;
+}
+// 알림 원문에 계좌의 연결 키워드(예: 끝 4자리, '토스뱅크')가 있고 '잔액'이 있으면 그 계좌 잔액 갱신
+function applyBalance(it) {
+  if (it.balance == null || !it.raw) return false;
+  const a = (state.assets || []).find(x => x.match && it.raw.includes(x.match));
+  if (!a) return false;
+  a.balance = it.balance; a.updated = it.date || todayStr(); return true;
+}
+function assetsDaily() { const c = autoAccrue() | syncLinkedGoals() | snapshotDaily(); if (c) save(); }
+
+function sparkline(points, w = 300, h = 44) {
+  if (points.length < 2) return '';
+  const vs = points.map(p => p[1]), min = Math.min(...vs), max = Math.max(...vs), span = max - min || 1;
+  const d = points.map((p, i) => `${i ? 'L' : 'M'}${(i / (points.length - 1) * w).toFixed(1)},${(h - 4 - (p[1] - min) / span * (h - 8)).toFixed(1)}`).join('');
+  return `<svg class="spark" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none"><path d="${d}" fill="none" stroke="var(--gold)" stroke-width="2" vector-effect="non-scaling-stroke"/></svg>`;
+}
+function assetsHtml() {
+  const a = state.assets || [], t = assetTotals();
+  const hist = Object.entries(state.settings.netHist || {}).sort().slice(-90).map(([d, v]) => [d, v.net]);
+  const past = hist.find(([d]) => d >= todayStr().replace(/\d\d$/, '01')) || hist[0];
+  const diff = past && hist.length > 1 ? t.net - past[1] : null;
+  const order = k => ASSET_KINDS.indexOf(k);
+  return `<section class="card">
+    <div class="row"><h2>총 자산</h2><button class="btn sm ghost" data-add-asset>＋</button></div>
+    <div class="big">${won(t.net)}</div>
+    <div class="muted">금융 ${won(t.fin)}${t.debt ? ` · 부채 ${won(t.debt)}` : ''}${diff != null ? ` · 이번 달 ${diff >= 0 ? '▲' : '▼'}${shortWon(Math.abs(diff))}` : ''}</div>
+    ${sparkline(hist)}
+    ${a.length ? `<ul class="list">${a.slice().sort((x, y) => order(x.kind) - order(y.kind) || (y.balance || 0) - (x.balance || 0)).map(x => `
+      <li data-asset="${x.id}"><div class="li-main"><span class="cat-ic bill-ic">${ASSET_ICON[x.kind] || '💎'}</span>
+        <div><div class="title">${esc(x.name)}</div><div class="sub">${esc(x.kind)}${x.updated ? ` · ${Number(x.updated.slice(5, 7))}/${Number(x.updated.slice(8))}` : ''}${x.match ? ' · 🔔' : ''}${x.monthly ? ` · +${shortWon(x.monthly)}/월` : ''}</div></div></div>
+        <div class="amount ${x.kind === '부채' && x.balance ? 'expense' : ''}">${x.kind === '부채' && x.balance ? '−' : ''}${won(x.balance || 0)}</div></li>`).join('')}</ul>` : `<div class="empty">없음</div>`}
+  </section>`;
+}
+function openAssetSheet(x) {
+  const isNew = !x;
+  x = x || { name: '', kind: '현금', balance: '', monthly: '', day: '', match: '' };
+  openSheet(`<h2>${isNew ? '자산 추가' : esc(x.name)}</h2>
+    <div class="grid2">
+      <div><label>이름</label><input name="name" required value="${esc(x.name)}" placeholder="예: 토스뱅크" maxlength="20"></div>
+      <div><label>종류</label><select name="kind">${ASSET_KINDS.map(k => `<option ${k === x.kind ? 'selected' : ''}>${k}</option>`).join('')}</select></div>
+    </div>
+    <label>현재 잔액</label><input name="balance" data-money inputmode="numeric" value="${moneyVal(x.balance)}" placeholder="0">
+    <div class="grid2">
+      <div><label>매월 자동 +</label><input name="monthly" data-money inputmode="numeric" value="${moneyVal(x.monthly)}" placeholder="0"></div>
+      <div><label>적립일</label><input name="day" type="number" min="1" max="31" value="${x.day || ''}"></div>
+    </div>
+    <label>🔔 알림 연결 (끝 4자리 등)</label><input name="match" value="${esc(x.match || '')}" placeholder="예: 5106" maxlength="20">`,
+    fd => {
+      if (!fd.name.trim()) { alert('이름을 입력하세요'); return false; }
+      const now = new Date(), day = Number(fd.day) || '', monthly = parseAmount(fd.monthly), bal = parseAmount(fd.balance);
+      const rec = { id: x.id || uid(), name: fd.name.trim(), kind: fd.kind, balance: bal, monthly, day, match: fd.match.trim(),
+        updated: bal !== x.balance || isNew ? todayStr() : x.updated,
+        // 적립 시작점: 잔액을 직접 고친 경우 그 시점부터 다시 계산
+        accruedTo: monthly ? ((isNew || bal !== x.balance || !x.accruedTo) ? (now.getDate() >= (day || 1) ? ym(now) : shiftMonth(ym(now), -1)) : x.accruedTo) : '' };
+      state.assets = state.assets || [];
+      if (isNew) state.assets.push(rec); else state.assets[state.assets.findIndex(a => a.id === x.id)] = rec;
+      syncLinkedGoals(); snapshotDaily();
+    },
+    isNew ? null : () => { state.assets = state.assets.filter(a => a.id !== x.id); syncLinkedGoals(); });
+}
+
 /* ===================== 연간 보기 + 월/연 선택 ===================== */
 // 기록 시작 월: 첫 거래 월과 고정 항목을 처음 저장한 월 중 이른 쪽.
 // (고정 항목은 시작일이 없어 모든 달에 적용되므로, 그 이전 달은 연간 합계에서 제외해야 가짜 숫자가 안 생김)
@@ -1370,9 +1477,11 @@ $('#monthLabel').onclick = () => openPicker();
 $('#fab').onclick = () => openTxSheet();
 
 view.addEventListener('click', e => {
-  const el = e.target.closest('[data-month-sum],[data-bill-import],[data-bill-paid],[data-bill],[data-add-bill],[data-bill-migrate],[data-open-month],[data-import-fixed],[data-clear-ended],[data-sms],[data-day],[data-clear-day],[data-edit-tx],[data-edit-fixed],[data-add-fixed],[data-edit-goal],[data-add-goal],[data-goto],#exportBtn,#importBtn,#resetBtn,#updateBtn,#loginBtn,#logoutBtn,#syncBtn,#dropBtn,#coachBtn,[data-copy]');
+  const el = e.target.closest('[data-asset],[data-add-asset],[data-month-sum],[data-bill-import],[data-bill-paid],[data-bill],[data-add-bill],[data-bill-migrate],[data-open-month],[data-import-fixed],[data-clear-ended],[data-sms],[data-day],[data-clear-day],[data-edit-tx],[data-edit-fixed],[data-add-fixed],[data-edit-goal],[data-add-goal],[data-goto],#exportBtn,#importBtn,#resetBtn,#updateBtn,#loginBtn,#logoutBtn,#syncBtn,#dropBtn,#coachBtn,[data-copy]');
   if (!el) return;
-  if ('monthSum' in el.dataset) openMonthSumSheet();
+  if (el.dataset.asset) openAssetSheet(state.assets.find(a => a.id === el.dataset.asset));
+  else if ('addAsset' in el.dataset) openAssetSheet();
+  else if ('monthSum' in el.dataset) openMonthSumSheet();
   else if ('billImport' in el.dataset) openBillImportSheet();
   else if (el.dataset.billPaid) { const b = state.bills.find(x => x.id === el.dataset.billPaid), m = ym(new Date()); b.paid = { ...(b.paid || {}), [m]: !b.paid?.[m] }; save(); render(); }
   else if (el.dataset.bill) openBillSheet(state.bills.find(x => x.id === el.dataset.bill));
@@ -1446,7 +1555,9 @@ function importData(file) {
 }
 
 /* ===================== 시작 ===================== */
+assetsDaily();
 render();
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { assetsDaily(); if (!sheet.open) render(); } });
 
 // 안드로이드 공유하기(Web Share Target) 또는 ?text= 링크로 들어온 결제 문자 처리
 function handleSharedText() {

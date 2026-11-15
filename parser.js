@@ -172,7 +172,8 @@
     const date = parseDate(lab.dateText || text, now) || `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
     const merchant = (lab.merchant || guessMerchant(text) || '').trim();
     const catType = type === 'income' ? 'income' : 'expense';
-    return { type, amount, date, merchant, category: guessCategory(catType, merchant, text), raw: text };
+    const bm = text.match(/잔액\s*[:：]?\s*(-?[\d,]{2,})\s*원?/); // 입출금 알림의 계좌 잔액 → 자산 자동 갱신
+    return { type, amount, date, merchant, category: guessCategory(catType, merchant, text), raw: text, balance: bm ? toNum(bm[1]) : null };
   }
 
   function parseNotifications(input, now = new Date()) {

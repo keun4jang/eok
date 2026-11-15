@@ -376,3 +376,5 @@ details.tip > div { margin-top: 6px; font-size: 13px; color: var(--muted); }
 details.act summary { align-items: center; }
 details.act > div { margin-top: 6px; }
 details.act > div b { color: var(--text); margin-right: 4px; }
+
+.spark { width: 100%; height: 44px; display: block; margin: 8px 0 4px; }
