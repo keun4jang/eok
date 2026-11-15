@@ -1,0 +1,38 @@
+{
+  "name": "억 — 억 단위로 모으는 돈 관리",
+  "short_name": "억",
+  "description": "수입·지출·고정지출 기록과 목표 금액 달성 계획",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#0C0D10",
+  "theme_color": "#0C0D10",
+  "lang": "ko",
+  "icons": [
+    {
+      "src": "icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    },
+    {
+      "src": "icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "share_target": {
+    "action": "./",
+    "method": "GET",
+    "params": {
+      "title": "title",
+      "text": "text",
+      "url": "url"
+    }
+  }
+}
