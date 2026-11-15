@@ -9,7 +9,7 @@
  * - 클라우드에는 'meta' 문서 1개 + 월별 거래 문서 'tx-YYYY-MM' 로 나눠 저장(문서 1MB 제한 대비).
  */
 (function (root) {
-  const TYPES = ['tx', 'fixed', 'goals', 'bills', 'assets'];
+  const TYPES = ['tx', 'fixed', 'goals', 'bills', 'assets', 'funds'];
   const noU = (k, v) => (k === 'u' ? undefined : v);
 
   // 저장 직전 호출: 이전 스냅샷과 비교해 바뀐 레코드에 u를 찍고, 사라진 레코드는 tomb에 기록
@@ -66,7 +66,7 @@
   function toChunks(state) {
     const chunks = {
       meta: {
-        fixed: state.fixed || [], goals: state.goals || [], bills: state.bills || [], assets: state.assets || [], tomb: state.tomb || {},
+        fixed: state.fixed || [], goals: state.goals || [], bills: state.bills || [], assets: state.assets || [], funds: state.funds || [], tomb: state.tomb || {},
         settings: state.settings || {}, settingsU: state.settingsU || 0,
         merchantCats: state.merchantCats || {}, mcU: state.mcU || 0,
       },
@@ -85,7 +85,7 @@
     const tx = [];
     for (const [k, v] of Object.entries(chunks)) if (k.startsWith('tx-')) tx.push(...(v.tx || []));
     return {
-      tx, fixed: meta.fixed || [], goals: meta.goals || [], bills: meta.bills || [], assets: meta.assets || [], tomb: meta.tomb || {},
+      tx, fixed: meta.fixed || [], goals: meta.goals || [], bills: meta.bills || [], assets: meta.assets || [], funds: meta.funds || [], tomb: meta.tomb || {},
       settings: meta.settings || {}, settingsU: meta.settingsU || 0,
       merchantCats: meta.merchantCats || {}, mcU: meta.mcU || 0,
     };
