@@ -16,19 +16,22 @@
     let lastErr;
     for (const model of MODELS) {
       try {
+        const headers = { 'Content-Type': 'application/json', 'x-goog-api-key': c.apiKey };
+        const ac = await window.EokSync?.appCheckToken?.().catch(() => null);
+        if (ac) headers['X-Firebase-AppCheck'] = ac; // AI Logic은 App Check가 적용돼 있어 토큰 필수
         const res = await fetch(`https://firebasevertexai.googleapis.com/v1beta/projects/${c.projectId}/models/${model}:generateContent`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'x-goog-api-key': c.apiKey },
+          headers,
           body: JSON.stringify({
             contents: [{ role: 'user', parts: [{ text: prompt }] }],
             generationConfig: { temperature: 0, responseMimeType: 'application/json', responseSchema: schema },
           }),
         });
         const j = await res.json();
-        if (!res.ok) { lastErr = new Error(j?.error?.status === 'PERMISSION_DENIED' ? 'AI 미설정' : (j?.error?.status === 'RESOURCE_EXHAUSTED' ? 'AI 한도 초과 · 잠시 후' : (j?.error?.message || res.status))); if (res.status === 404 || res.status === 400) continue; throw lastErr; }
+        if (!res.ok) { lastErr = new Error(j?.error?.status === 'UNAUTHENTICATED' ? 'AI 인증(App Check) 실패' : j?.error?.status === 'PERMISSION_DENIED' ? 'AI 미설정' : (j?.error?.status === 'RESOURCE_EXHAUSTED' ? 'AI 한도 초과 · 잠시 후' : (j?.error?.message || res.status))); if (res.status === 404 || res.status === 400) continue; throw lastErr; }
         const txt = j?.candidates?.[0]?.content?.parts?.map(p => p.text || '').join('') || '';
         return JSON.parse(txt);
-      } catch (e) { lastErr = e; if (/미설정|한도/.test(e.message)) throw e; }
+      } catch (e) { lastErr = e; if (/미설정|한도|인증/.test(e.message)) throw e; }
     }
     throw lastErr || new Error('AI 실패');
   }

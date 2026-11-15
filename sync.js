@@ -17,6 +17,14 @@ async function init() {
     ]);
     const a = app.initializeApp(config);
     fb = { auth, fs, authInst: auth.getAuth(a), db: fs.getFirestore(a) };
+    // App Check(reCAPTCHA v3): AI 호출이 이 앱에서 온 것임을 증명하는 토큰. 사이트 키가 있을 때만.
+    if (config.appCheckSiteKey) {
+      try {
+        const ac = await import(FB + 'firebase-app-check.js');
+        const inst = ac.initializeAppCheck(a, { provider: new ac.ReCaptchaV3Provider(config.appCheckSiteKey), isTokenAutoRefreshEnabled: true });
+        window.EokSync.appCheckToken = async () => (await ac.getToken(inst, false)).token;
+      } catch (e) { console.warn('App Check 초기화 실패', e); }
+    }
     await auth.setPersistence(fb.authInst, auth.browserLocalPersistence);
     auth.getRedirectResult(fb.authInst).catch(e => set({ error: msg(e) }));
     auth.onAuthStateChanged(fb.authInst, onUser);
