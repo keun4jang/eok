@@ -112,11 +112,12 @@ ${text.slice(0, 12000)}
         actions: S('ARRAY', { items: S('OBJECT', {
           properties: {
             priority: S('INTEGER'), area: S('STRING', { enum: ['비상금', '부채', '지출', '보험', '절세', '투자', '수입', '현금흐름'] }),
-            title: S('STRING'), why: S('STRING'), how: S('STRING'), monthlyImpact: S('INTEGER', { nullable: true }),
+            title: S('STRING'), why: S('STRING'), how: S('STRING'), rule: S('STRING'), monthlyImpact: S('INTEGER', { nullable: true }),
           },
           required: ['priority', 'area', 'title', 'why', 'how'],
         }) }),
         warnings: S('ARRAY', { items: S('STRING') }),
+        progress: S('STRING', { nullable: true }),
       },
       required: ['score', 'summary', 'goal', 'actions', 'warnings'],
     });
@@ -129,10 +130,14 @@ ${text.slice(0, 12000)}
 - 보험료가 소득 대비 높으면 중복 보장 점검을 권하되 해지 판단은 보장 확인 후로.
 - 세율·한도·상품 조건은 바뀔 수 있으니 수치가 불확실하면 "최신 조건 확인"을 덧붙여라.
 - 특정 종목의 단기 등락 예측 금지.
+- 할부는 until(마지막 달)을 보고 곧 끝나는 것은 '정리' 대상이 아니라 '새 할부 금지'로 말하라. 조기 상환은 절약이 아니다.
+- thisMonth.roomForVariableSpending(수입−고정지출−고정투자)이 변동지출 실적보다 작으면 구조적 적자다. 예산을 얼마로, 무엇을 줄여 맞출지 숫자로 제시하라.
+- previousAdvice가 있으면 그 행동들이 데이터상 실행됐는지 평가해 progress에 쓰고, 이미 반영된 것(예: 종목 정리)은 반복하지 마라.
 출력:
 - score: 0~100 재무 건강 점수, summary: 2~3문장.
 - goal: 목표 달성에 필요한 월 저축·투자액, 현재 페이스 기준 예상 개월수(계산 불가면 null), verdict 한 줄.
-- actions: 우선순위 순 5~8개. title은 15자 이내, why는 데이터 근거 1~2문장, how는 구체적 실행 방법(어디서·얼마·언제), monthlyImpact는 월 개선 금액(원, 추정 가능할 때만).
+- actions: 우선순위 순 5~8개. title은 15자 이내, why는 데이터 근거 1~2문장, how는 구체적 실행 방법(어디서·얼마·언제), rule은 이 판단의 일반 원칙 한 줄(다음에 사용자가 스스로 판단할 수 있게), monthlyImpact는 월 개선 금액(원, 추정 가능할 때만).
+- progress: 지난 진단 대비 변화 평가 1~2문장(없으면 null).
 - warnings: 위험 신호 0~4개.
 사용자 데이터(JSON, 금액 원):
 ${JSON.stringify(snapshot)}`;
