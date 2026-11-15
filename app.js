@@ -875,14 +875,14 @@ function openGoalSheet(g) {
     <label>목표 이름</label><input name="name" required value="${esc(g.name)}" placeholder="예: 전세 보증금, 비상금, 여행" maxlength="30" />
     <label>목표 금액</label><input name="target" data-money inputmode="numeric" required value="${moneyVal(g.target)}" />
     <label>현재 모은 금액</label><input name="saved" data-money inputmode="numeric" value="${moneyVal(g.saved)}" placeholder="0" />
-    <label style="display:flex;align-items:center;gap:8px;color:var(--text)"><input type="checkbox" name="link" value="net" style="width:auto" ${g.link === 'net' ? 'checked' : ''}/> 총 자산(순자산)과 연동</label>
+    <label>자산 연동</label><select name="link"><option value="">안 함 (직접 입력)</option><option value="net" ${g.link === 'net' ? 'selected' : ''}>순자산 (보증금·부채 포함)</option><option value="fin" ${g.link === 'fin' ? 'selected' : ''}>금융자산 (현금·예적금·투자·코인)</option></select>
     <label>목표 시점</label><input name="deadline" type="month" required value="${g.deadline}" min="${shiftMonth(ym(new Date()), 1)}" />
     <label>연수익률 %</label><input name="rate" type="number" step="0.1" min="0" max="20" value="${g.rate}" />
     <div class="hint">예금 2~3 · 주식 4~6</div>`,
     fd => {
       const target = parseAmount(fd.target);
       if (!target || !fd.name.trim()) { alert('이름과 목표 금액을 입력하세요'); return false; }
-      const rec = { id: g.id || uid(), name: fd.name.trim(), target, saved: parseAmount(fd.saved), deadline: fd.deadline, rate: Math.max(0, Number(fd.rate) || 0), ...(fd.link ? { link: 'net' } : {}) };
+      const rec = { id: g.id || uid(), name: fd.name.trim(), target, saved: parseAmount(fd.saved), deadline: fd.deadline, rate: Math.max(0, Number(fd.rate) || 0), ...(fd.link ? { link: fd.link } : {}) };
       if (isNew) state.goals.push(rec); else state.goals[state.goals.findIndex(x => x.id === g.id)] = rec;
       syncLinkedGoals();
     },
@@ -1211,9 +1211,16 @@ function openMonthSumSheet(initialText = '') {
   openSheet(`<h2>월 합계 붙여넣기</h2>
     <div class="row" style="margin-bottom:8px"><button type="button" class="btn sm ghost" data-act="clip">📋 붙여넣기</button><button type="button" class="link-btn" data-act="clear">지우기</button></div>
     <textarea name="sumText" rows="6" placeholder="| 항목 | 카테고리 | 월 | 금액 |&#10;| 주유 | 교통 | 2026-10 | 120,000원 |"></textarea>
+    <label style="display:flex;align-items:center;gap:8px;color:var(--text)"><input type="checkbox" name="replace" style="width:auto"/> 표에 있는 달은 기존 월 합계 전부 교체</label>
     <div id="sumPreview"></div>`,
-    () => {
+    fd => {
       if (!rows.length) { alert('인식된 항목이 없어요'); return false; }
+      if (fd.replace) { // 정정용: 표에 나온 달의 기존 월 합계를 모두 지우고 새로 넣음
+        const ms = new Set(rows.map(r => r.m));
+        const n = state.tx.filter(t => t.sum && ms.has(t.date.slice(0, 7))).length;
+        if (n && !confirm(`${[...ms].sort().join(', ')}\n기존 월 합계 ${n}건을 지우고 새로 넣을까요?`)) return false;
+        state.tx = state.tx.filter(t => !(t.sum && ms.has(t.date.slice(0, 7))));
+      }
       for (const r of rows) {
         const memo = `${r.name} (월합계)`;
         state.tx = state.tx.filter(t => !(t.memo === memo && t.date.startsWith(r.m))); // 같은 월 합계는 덮어쓰기
@@ -1288,8 +1295,11 @@ function autoAccrue() {
   return changed;
 }
 function syncLinkedGoals() {
-  const { net } = assetTotals(); let changed = false;
-  for (const g of state.goals) if (g.link === 'net' && (state.assets || []).length && g.saved !== net) { g.saved = net; changed = true; }
+  const t = assetTotals(); let changed = false;
+  for (const g of state.goals) {
+    const v = g.link === 'net' ? t.net : g.link === 'fin' ? t.fin : null;
+    if (v != null && (state.assets || []).length && g.saved !== v) { g.saved = v; changed = true; }
+  }
   return changed;
 }
 function snapshotDaily() {
