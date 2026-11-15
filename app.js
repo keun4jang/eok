@@ -688,8 +688,11 @@ function refreshAccount() {
 }
 // 자동 수집: 알림 원문들을 문자 입력과 같은 규칙으로 해석해 바로 등록
 // (중복 의심·고정 항목과 겹침은 건너뜀, 승인취소는 원 거래 삭제). 등록된 거래에는 auto 표시.
+// 자동 수집은 '모든 앱'에서 올 수 있어, 금융기관 표시가 있는 알림만 받는다(친구 카톡 "3만원 입금했어" 같은 것 제외)
+const FIN_MARK = /카드|은행|뱅크|BANK|페이|Pay|증권|Web발신|잔액|누적|일시불|할부|체크|\b(KB|NH|IBK|SC|BC|KEB|SH)\b|토스|카카오뱅크|케이뱅크|우체국|새마을|신협|농협|수협/i;
 function ingest(texts) {
-  const items = buildSmsItems(texts.join('\n\n'));
+  const fin = texts.filter(t => FIN_MARK.test(t));
+  const items = buildSmsItems(fin.join('\n\n'));
   let added = 0, removed = 0;
   const balUp = items.map(applyBalance).filter(Boolean).length; if (balUp) syncLinkedGoals();
   for (const it of items) {
@@ -700,7 +703,7 @@ function ingest(texts) {
     added++;
   }
   if (added || removed || balUp) { save(); if (!sheet.open) render(); }
-  toast(`자동 ${added}건 등록${removed ? ` · 취소 ${removed}` : ''}`);
+  toast(`자동 ${added}건 등록${removed ? ` · 취소 ${removed}` : ''}${texts.length - fin.length ? ` · 무시 ${texts.length - fin.length}` : ''}`);
 }
 window.EokApp = { getState: () => state, adopt, refreshAccount, ingest };
 
