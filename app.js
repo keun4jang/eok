@@ -394,7 +394,7 @@ function renderFixed() {
       <div class="row"><h2>투자 <span class="h-sum income">${won(sum(sav))}</span></h2><button class="btn sm ghost" data-add-fixed="saving">＋</button></div>
       ${sav.length ? `<ul class="list">${sav.map(item).join('')}</ul>` : `<div class="empty">없음</div>`}
     </section>
-    ${inst.length ? `<section class="card"><h2>할부 <span class="h-sum expense">${won(sum(inst))}</span></h2><ul class="list">${inst.map(item).join('')}</ul></section>` : ''}
+    ${inst.length ? `<section class="card"><div class="row"><h2>할부 <span class="h-sum expense">${won(sum(inst))}</span></h2><button class="link-btn" data-inst-end>모두 이번 달 종료</button></div><ul class="list">${inst.map(item).join('')}</ul></section>` : ''}
     ${ended.length ? `<section class="card"><div class="row"><h2 class="muted">끝난 할부 ${ended.length}건</h2><button class="link-btn" data-clear-ended>정리</button></div></section>` : ''}
   `;
 }
@@ -1443,18 +1443,32 @@ function delCat(kind, name) {
 
 /* ===================== 예산 · 월간 리뷰 ===================== */
 // 여유 한도 = 수입 − 고정지출(공과금·할부 포함) − 고정 투자. 변동지출(건별 결제)이 이 안에 들어와야 적자가 아니다.
-function budgetInfo(m = ym(new Date())) {
-  const s = monthStats(m);
+// 예산 기간: 시작일(월급일, 기본 1일)부터 다음 시작일 전날까지. m = 기간이 시작하는 달
+function budgetPeriod(m) {
+  const sd = state.settings.budget?.startDay || 1;
+  const [y, mo] = m.split('-').map(Number);
+  const start = new Date(y, mo - 1, Math.min(sd, new Date(y, mo, 0).getDate()));
+  const end = new Date(y, mo, Math.min(sd, new Date(y, mo + 1, 0).getDate())); end.setDate(end.getDate() - 1);
+  const f = d => `${ym(d)}-${String(d.getDate()).padStart(2, '0')}`;
+  return { from: f(start), to: f(end), days: Math.round((end - start) / 864e5) + 1 };
+}
+function currentPeriodMonth() { // 오늘이 속한 예산 기간의 시작 달
+  const now = new Date(), sd = state.settings.budget?.startDay || 1;
+  return now.getDate() >= sd ? ym(now) : shiftMonth(ym(now), -1);
+}
+function budgetInfo(m = currentPeriodMonth()) {
+  // 25일~24일처럼 걸치는 기간이면, 고정 수입·지출·투자는 기간 대부분이 속한 다음 달 기준으로 본다
+  const s = monthStats((state.settings.budget?.startDay || 1) > 1 ? shiftMonth(m, 1) : m);
   const room = s.income - s.fixedExpense - s.saving;
-  const spent = s.varExpense;
+  const p = budgetPeriod(m);
+  const spent = state.tx.filter(t => t.type === 'expense' && !t.sum && t.date >= p.from && t.date <= p.to).reduce((a, t) => a + t.amount, 0);
   const budget = state.settings.budget?.monthly || 0;
-  const now = new Date(), isCur = m === ym(now);
-  const [y, mo] = m.split('-').map(Number), days = new Date(y, mo, 0).getDate();
-  const day = isCur ? now.getDate() : days;
+  const today = todayStr(), isCur = today >= p.from && today <= p.to;
+  const day = isCur ? Math.round((new Date(today) - new Date(p.from)) / 864e5) + 1 : p.days;
   const left = budget - spent;
-  return { s, room, spent, budget, left, days, day,
-    perDay: isCur && budget ? Math.max(0, Math.floor(left / (days - day + 1))) : 0,
-    projected: day ? Math.round(spent / day * days) : spent };
+  return { s, room, spent, budget, left, days: p.days, day, period: p,
+    perDay: isCur && budget ? Math.max(0, Math.floor(left / (p.days - day + 1))) : 0,
+    projected: day ? Math.round(spent / day * p.days) : spent };
 }
 function budgetHtml() {
   if (viewMode !== 'month' || viewMonth !== ym(new Date())) return '';
@@ -1462,7 +1476,7 @@ function budgetHtml() {
   if (!b.budget) return `<button class="sms-cta" data-budget><span class="cat-ic" style="--c:var(--gold)">💰</span><span><b>변동지출 예산 정하기</b><small>여유 한도 ${won(b.room)}</small></span><span class="chev">›</span></button>`;
   const p = Math.min(100, pct(b.spent, b.budget)), over = b.spent > b.budget, warn = !over && p >= 80;
   return `<section class="card" data-budget>
-    <div class="row"><h2>💰 예산</h2><span class="muted">${won(b.spent)} / ${won(b.budget)}</span></div>
+    <div class="row"><h2>💰 예산 <span class="muted" style="font-weight:400;font-size:12px">${b.period.from.slice(5).replace('-', '/')}~${b.period.to.slice(5).replace('-', '/')}</span></h2><span class="muted">${won(b.spent)} / ${won(b.budget)}</span></div>
     <div class="bar ${over || warn ? 'over' : ''}"><i style="width:${p}%"></i></div>
     <div class="row" style="margin-top:8px"><span class="muted">${over ? `초과 ${won(-b.left)}` : `남음 ${won(b.left)}`}</span><b>${over ? '⛔' : `하루 ${won(b.perDay)}`}</b></div>
     ${b.projected > b.budget && !over ? `<div class="hint">⚠ 이 속도면 월말 ${won(b.projected)}</div>` : ''}
@@ -1476,13 +1490,16 @@ function openBudgetSheet() {
   const r = n => Math.max(0, Math.round(n / 10000) * 10000);
   openSheet(`<h2>💰 변동지출 예산</h2>
     <div class="muted">고정지출·투자를 뺀 여유 한도 <b>${won(b.room)}</b></div>
-    <label>월 예산</label><input name="monthly" data-money inputmode="numeric" value="${moneyVal(b.budget)}" placeholder="0">
+    <div class="grid2">
+      <div><label>월 예산</label><input name="monthly" data-money inputmode="numeric" value="${moneyVal(b.budget)}" placeholder="0"></div>
+      <div><label>시작일 (월급일)</label><input name="startDay" type="number" min="1" max="28" value="${state.settings.budget?.startDay || 1}"></div>
+    </div>
     <div class="chips">
       <button type="button" class="chip" data-set="${r(b.room)}" style="--c:var(--income)">여유 한도 ${shortWon(r(b.room))}</button>
       ${avg ? `<button type="button" class="chip" data-set="${r(avg * 0.8)}" style="--c:var(--gold)">평소의 80% ${shortWon(r(avg * 0.8))}</button>` : ''}
     </div>
     <div class="hint">여유 한도보다 크게 잡으면 그 차이만큼 매달 적자(저축을 깨거나 빚)</div>`,
-    fd => { state.settings.budget = { ...(state.settings.budget || {}), monthly: parseAmount(fd.monthly) }; });
+    fd => { state.settings.budget = { ...(state.settings.budget || {}), monthly: parseAmount(fd.monthly), startDay: Math.min(28, Math.max(1, Number(fd.startDay) || 1)) }; });
   form.querySelectorAll('[data-set]').forEach(c => c.onclick = () => { form.querySelector('[name=monthly]').value = moneyVal(Number(c.dataset.set)); });
 }
 // 매달 1~7일: 지난달 돌아보기
@@ -1637,9 +1654,13 @@ $('#monthLabel').onclick = () => openPicker();
 $('#fab').onclick = () => openTxSheet();
 
 view.addEventListener('click', e => {
-  const el = e.target.closest('[data-budget],[data-classify],[data-del-cat],#addCatBtn,[data-asset],[data-add-asset],[data-month-sum],[data-bill-import],[data-bill-paid],[data-bill],[data-add-bill],[data-bill-migrate],[data-open-month],[data-import-fixed],[data-clear-ended],[data-sms],[data-day],[data-clear-day],[data-edit-tx],[data-edit-fixed],[data-add-fixed],[data-edit-goal],[data-add-goal],[data-goto],#exportBtn,#importBtn,#resetBtn,#updateBtn,#loginBtn,#logoutBtn,#syncBtn,#dropBtn,#coachBtn,[data-copy]');
+  const el = e.target.closest('[data-inst-end],[data-budget],[data-classify],[data-del-cat],#addCatBtn,[data-asset],[data-add-asset],[data-month-sum],[data-bill-import],[data-bill-paid],[data-bill],[data-add-bill],[data-bill-migrate],[data-open-month],[data-import-fixed],[data-clear-ended],[data-sms],[data-day],[data-clear-day],[data-edit-tx],[data-edit-fixed],[data-add-fixed],[data-edit-goal],[data-add-goal],[data-goto],#exportBtn,#importBtn,#resetBtn,#updateBtn,#loginBtn,#logoutBtn,#syncBtn,#dropBtn,#coachBtn,[data-copy]');
   if (!el) return;
-  if ('budget' in el.dataset) openBudgetSheet();
+  if ('instEnd' in el.dataset) {
+    const now = ym(new Date()), list = state.fixed.filter(f => f.until && f.until > now);
+    if (list.length && confirm(`할부 ${list.length}건을 이번 달로 끝낼까요? (완납·선결제 했을 때)`)) { list.forEach(f => { f.until = now; }); save(); render(); toast(`할부 ${list.length}건 종료`); }
+  }
+  else if ('budget' in el.dataset) openBudgetSheet();
   else if ('classify' in el.dataset) openClassifySheet();
   else if (el.dataset.delCat) { const [k, n] = el.dataset.delCat.split('|'); delCat(k, n); }
   else if (el.id === 'addCatBtn') addCat();
