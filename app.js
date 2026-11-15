@@ -31,6 +31,7 @@ let state = load();
 let snap = SyncCore.snapshot(state); // 마지막 저장 시점 스냅샷 — 저장할 때 바뀐 레코드에 수정 시각(u)을 찍는 데 사용
 let currentTab = 'home';
 let viewMonth = ym(new Date());
+let viewMode = 'month'; // 'month' | 'year'
 let txMode = 'list';      // 'list' | 'cal'
 let selectedDay = null;   // 달력에서 선택한 날짜
 
@@ -178,7 +179,7 @@ const view = $('#view');
 
 function render() {
   document.querySelectorAll('.tabbar button').forEach(b => b.classList.toggle('active', b.dataset.tab === currentTab));
-  $('#monthLabel').textContent = monthLabel(viewMonth);
+  $('#monthLabel').textContent = viewMode === 'year' ? `${viewMonth.slice(0, 4)}년` : monthLabel(viewMonth);
   $('#monthPicker').style.visibility = (currentTab === 'home' || currentTab === 'tx') ? 'visible' : 'hidden';
   $('#fab').style.display = (currentTab === 'home' || currentTab === 'tx') ? '' : 'none';
   ({ home: renderHome, tx: renderTx, fixed: renderFixed, goals: renderGoals, insights: renderInsights })[currentTab]();
@@ -186,6 +187,7 @@ function render() {
 }
 
 function renderHome() {
+  if (viewMode === 'year') return renderYearHome();
   const s = monthStats(viewMonth);
   const rate = s.income > 0 ? Math.round((s.net / s.income) * 100) : 0;
   const cats = Object.entries(s.byCat).sort((a, b) => b[1] - a[1]);
@@ -264,6 +266,7 @@ function txItem(t) {
 
 const WEEK = ['일', '월', '화', '수', '목', '금', '토'];
 function renderTx() {
+  if (viewMode === 'year') return renderYearTx();
   const s = monthStats(viewMonth);
   const list = [...s.txs]
     .filter(t => !selectedDay || t.date === selectedDay)
@@ -882,6 +885,129 @@ function toast(msg) {
   setTimeout(() => el.remove(), 2200);
 }
 
+
+/* ===================== 연간 보기 + 월/연 선택 ===================== */
+// 기록 시작 월: 첫 거래 월과 고정 항목을 처음 저장한 월 중 이른 쪽.
+// (고정 항목은 시작일이 없어 모든 달에 적용되므로, 그 이전 달은 연간 합계에서 제외해야 가짜 숫자가 안 생김)
+function startMonth() {
+  const c = [];
+  for (const t of state.tx) if (t.date) c.push(t.date.slice(0, 7));
+  for (const f of state.fixed) if (f.u) c.push(ym(new Date(f.u)));
+  return c.length ? c.sort()[0] : ym(new Date());
+}
+function yearStats(y) {
+  const now = ym(new Date()), start = startMonth();
+  const months = Array.from({ length: 12 }, (_, i) => `${y}-${String(i + 1).padStart(2, '0')}`).map(m => {
+    const s = monthStats(m);
+    return { ...s, counted: m >= start && m <= now, future: m > now };
+  });
+  const cm = months.filter(m => m.counted);
+  const add = k => cm.reduce((a, m) => a + m[k], 0);
+  const byCat = {};
+  cm.forEach(m => Object.entries(m.byCat).forEach(([k, v]) => { byCat[k] = (byCat[k] || 0) + v; }));
+  return { y, months, counted: cm, income: add('income'), expense: add('expense'), fixedExpense: add('fixedExpense'),
+    varExpense: add('varExpense'), net: add('net'), byCat };
+}
+const yearRange = ys => ys.counted.length ? (ys.counted.length === 1 ? `${Number(ys.counted[0].m.slice(5))}월` : `${Number(ys.counted[0].m.slice(5))}~${Number(ys.counted.at(-1).m.slice(5))}월`) : '기록 없음';
+
+function renderYearHome() {
+  const ys = yearStats(Number(viewMonth.slice(0, 4)));
+  const rate = ys.income > 0 ? Math.round((ys.net / ys.income) * 100) : 0;
+  const cats = Object.entries(ys.byCat).sort((a, b) => b[1] - a[1]);
+  const max = Math.max(1, ...ys.months.map(m => Math.max(m.income, m.expense)));
+  view.innerHTML = `
+    <section class="hero">
+      <div class="hero-label">${ys.y}년 · ${yearRange(ys)}</div>
+      <div class="hero-amount ${ys.net < 0 ? 'neg' : ''}">${won(ys.net)}</div>
+      <div class="hero-bar"><i style="width:${ys.income > 0 ? Math.min(100, pct(ys.expense, ys.income)) : 0}%"></i></div>
+      <div class="hero-meta"><span>지출 ${ys.income > 0 ? pct(ys.expense, ys.income) : 0}%</span><span>저축률 ${ys.income > 0 ? rate + '%' : '–'}</span></div>
+      <div class="hero-split">
+        <div><span>수입</span><b>${won(ys.income)}</b></div>
+        <div><span>지출</span><b>${won(ys.expense)}</b></div>
+      </div>
+    </section>
+    <section class="card">
+      <div class="row"><h2>월별</h2><span class="legend"><i class="lg-in"></i>수입 <i class="lg-ex"></i>지출</span></div>
+      <div class="ychart">${ys.months.map(m => `
+        <button class="ycol ${m.counted ? '' : 'dim'} ${m.m === ym(new Date()) ? 'now' : ''}" data-open-month="${m.m}">
+          <span class="ybars">
+            <i class="yb-in" style="height:${m.counted ? Math.round(m.income / max * 100) : 0}%"></i>
+            <i class="yb-ex" style="height:${m.counted ? Math.round(m.expense / max * 100) : 0}%"></i>
+          </span>
+          <span class="ylab">${Number(m.m.slice(5))}</span>
+        </button>`).join('')}
+      </div>
+    </section>
+    <section class="card grid2 compact">
+      <div class="stat"><div class="label">고정지출</div><div class="value">${won(ys.fixedExpense)}</div></div>
+      <div class="stat"><div class="label">변동지출</div><div class="value">${won(ys.varExpense)}</div></div>
+    </section>
+    <section class="card">
+      <h2>지출 구성</h2>
+      ${cats.length ? `
+        <div class="donut-wrap">${donut(cats, ys.varExpense)}<div class="donut-center"><span>변동지출</span><b>${shortWon(ys.varExpense)}원</b></div></div>
+        <ul class="list cats">${cats.map(([c, v]) => `
+          <li><div class="li-main">${catIcon(c)}<div><div class="title">${esc(c)}</div><div class="sub">${pct(v, ys.varExpense)}%</div></div></div>
+          <div class="amount">${won(v)}</div></li>`).join('')}</ul>` : `<div class="empty">기록 없음</div>`}
+    </section>`;
+}
+
+function renderYearTx() {
+  const ys = yearStats(Number(viewMonth.slice(0, 4)));
+  const rows = ys.months.filter(m => m.counted || m.txCount).reverse();
+  view.innerHTML = `
+    <section class="card grid2 compact">
+      <div class="stat"><div class="label">${ys.y}년 수입</div><div class="value income">${won(ys.income)}</div></div>
+      <div class="stat"><div class="label">${ys.y}년 지출</div><div class="value expense">${won(ys.expense)}</div></div>
+    </section>
+    <section class="card">
+      ${rows.length ? `<ul class="list">${rows.map(m => `
+        <li data-open-month="${m.m}">
+          <div class="li-main"><span class="cat-ic" style="--c:var(--gold)">${Number(m.m.slice(5))}</span>
+            <div><div class="title">${Number(m.m.slice(5))}월</div><div class="sub">${m.txCount}건</div></div></div>
+          <div style="text-align:right"><div class="amount ${m.net < 0 ? 'expense' : ''}">${m.net < 0 ? '−' : '+'}${won(Math.abs(m.net))}</div>
+            <div class="sub muted">−${shortWon(m.expense)}</div></div>
+        </li>`).join('')}</ul>` : `<div class="empty">기록 없음</div>`}
+    </section>`;
+}
+
+// 상단 "2026년 11월" 눌렀을 때: 월/연 전환 + 달력식 선택
+function openPicker() {
+  let mode = viewMode, y = Number(viewMonth.slice(0, 4));
+  const dataMonths = new Set(state.tx.map(t => t.date.slice(0, 7)));
+  const draw = () => {
+    const cur = ym(new Date());
+    form.innerHTML = `
+      <div class="seg" style="margin-bottom:14px">
+        <input type="radio" name="pm" id="pmM" ${mode === 'month' ? 'checked' : ''}><label for="pmM" data-pmode="month">월</label>
+        <input type="radio" name="pm" id="pmY" ${mode === 'year' ? 'checked' : ''}><label for="pmY" data-pmode="year">연</label>
+      </div>
+      ${mode === 'month' ? `
+        <div class="row pk-year"><button type="button" class="icon-btn" data-py="-1">‹</button><b>${y}년</b><button type="button" class="icon-btn" data-py="1">›</button></div>
+        <div class="pk-grid">${Array.from({ length: 12 }, (_, i) => {
+          const m = `${y}-${String(i + 1).padStart(2, '0')}`;
+          return `<button type="button" class="pk ${m === viewMonth && viewMode === 'month' ? 'sel' : ''} ${m === cur ? 'now' : ''}" data-pick="${m}">${i + 1}월${dataMonths.has(m) ? '<i></i>' : ''}</button>`;
+        }).join('')}</div>`
+      : `<div class="pk-grid">${Array.from({ length: 6 }, (_, i) => new Date().getFullYear() - 4 + i).map(yy =>
+          `<button type="button" class="pk ${yy === y && viewMode === 'year' ? 'sel' : ''} ${yy === new Date().getFullYear() ? 'now' : ''}" data-pick-year="${yy}">${yy}</button>`).join('')}</div>`}
+      <div class="actions"><button type="button" class="btn ghost" data-pk-today>오늘</button><button type="button" class="btn ghost" data-pk-close>닫기</button></div>`;
+  };
+  draw();
+  form.onsubmit = e => e.preventDefault();
+  form.onclick = e => {
+    const t = e.target.closest('[data-pmode],[data-py],[data-pick],[data-pick-year],[data-pk-today],[data-pk-close]');
+    if (!t) return;
+    if (t.dataset.pmode) { mode = t.dataset.pmode; draw(); return; }
+    if (t.dataset.py) { y += Number(t.dataset.py); draw(); return; }
+    if (t.dataset.pick) { viewMode = 'month'; viewMonth = t.dataset.pick; }
+    else if (t.dataset.pickYear) { viewMode = 'year'; viewMonth = `${t.dataset.pickYear}-${viewMonth.slice(5)}`; }
+    else if ('pkToday' in t.dataset) { viewMode = 'month'; viewMonth = ym(new Date()); }
+    selectedDay = null; form.onclick = null; sheet.close(); render();
+  };
+  sheet.addEventListener('close', () => { form.onclick = null; }, { once: true });
+  sheet.showModal();
+}
+
 /* ===================== 이벤트 ===================== */
 document.querySelector('.tabbar').addEventListener('click', e => {
   const b = e.target.closest('button[data-tab]');
@@ -890,14 +1016,16 @@ document.querySelector('.tabbar').addEventListener('click', e => {
   render();
   window.scrollTo(0, 0);
 });
-$('#prevMonth').onclick = () => { selectedDay = null; viewMonth = shiftMonth(viewMonth, -1); render(); };
-$('#nextMonth').onclick = () => { selectedDay = null; viewMonth = shiftMonth(viewMonth, 1); render(); };
+$('#prevMonth').onclick = () => { selectedDay = null; viewMonth = shiftMonth(viewMonth, viewMode === 'year' ? -12 : -1); render(); };
+$('#nextMonth').onclick = () => { selectedDay = null; viewMonth = shiftMonth(viewMonth, viewMode === 'year' ? 12 : 1); render(); };
+$('#monthLabel').onclick = () => openPicker();
 $('#fab').onclick = () => openTxSheet();
 
 view.addEventListener('click', e => {
-  const el = e.target.closest('[data-import-fixed],[data-clear-ended],[data-sms],[data-day],[data-clear-day],[data-edit-tx],[data-edit-fixed],[data-add-fixed],[data-edit-goal],[data-add-goal],[data-goto],#exportBtn,#importBtn,#resetBtn,#updateBtn,#loginBtn,#logoutBtn,#syncBtn,#dropBtn,[data-copy]');
+  const el = e.target.closest('[data-open-month],[data-import-fixed],[data-clear-ended],[data-sms],[data-day],[data-clear-day],[data-edit-tx],[data-edit-fixed],[data-add-fixed],[data-edit-goal],[data-add-goal],[data-goto],#exportBtn,#importBtn,#resetBtn,#updateBtn,#loginBtn,#logoutBtn,#syncBtn,#dropBtn,[data-copy]');
   if (!el) return;
-  if ('importFixed' in el.dataset) openFixedImportSheet();
+  if (el.dataset.openMonth) { viewMode = 'month'; viewMonth = el.dataset.openMonth; selectedDay = null; render(); window.scrollTo(0, 0); }
+  else if ('importFixed' in el.dataset) openFixedImportSheet();
   else if ('clearEnded' in el.dataset) {
     const now = ym(new Date());
     if (confirm('끝난 할부를 목록에서 지울까요? (지난 달 통계에서도 빠집니다)')) { state.fixed = state.fixed.filter(f => !f.until || f.until >= now); save(); render(); }

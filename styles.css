@@ -326,3 +326,25 @@ details.tip summary::-webkit-details-marker { display: none; }
 details.tip summary::after { content: '›'; color: var(--muted); transition: transform .15s; }
 details.tip[open] summary::after { transform: rotate(90deg); }
 details.tip > div { margin-top: 6px; font-size: 13px; color: var(--muted); }
+
+/* ---------- 기간 선택 · 연간 보기 ---------- */
+.month-btn { border: 0; background: none; color: var(--text); font: inherit; font-weight: 600; font-size: 15px; padding: 6px 4px; cursor: pointer; }
+.month-btn::after { content: ' ▾'; color: var(--gold); font-size: 11px; }
+.pk-year { justify-content: center; gap: 18px; margin-bottom: 10px; font-size: 16px; }
+.pk-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.pk { position: relative; border: 1px solid var(--line); background: var(--surface-2); color: var(--text); border-radius: 12px; padding: 14px 0; font-weight: 600; cursor: pointer; }
+.pk.now { border-color: color-mix(in srgb, var(--gold) 60%, var(--line)); }
+.pk.sel { background: linear-gradient(180deg, var(--gold-hi), var(--gold)); color: var(--on-gold); border-color: transparent; }
+.pk i { position: absolute; top: 6px; right: 8px; width: 5px; height: 5px; border-radius: 50%; background: var(--gold); }
+.pk.sel i { background: var(--on-gold); }
+.legend { font-size: 11px; color: var(--muted); display: flex; align-items: center; gap: 4px; }
+.legend i { width: 8px; height: 8px; border-radius: 2px; display: inline-block; margin-left: 6px; }
+.lg-in, .yb-in { background: var(--income); }
+.lg-ex, .yb-ex { background: var(--gold); }
+.ychart { display: grid; grid-template-columns: repeat(12, 1fr); gap: 2px; margin-top: 12px; }
+.ycol { border: 0; background: none; padding: 0; cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.ybars { height: 110px; width: 100%; display: flex; align-items: flex-end; justify-content: center; gap: 2px; }
+.ybars i { width: 35%; max-width: 8px; border-radius: 3px 3px 0 0; min-height: 0; }
+.ylab { font-size: 11px; color: var(--muted); }
+.ycol.now .ylab { color: var(--gold); font-weight: 700; }
+.ycol.dim .ylab { opacity: .45; }
