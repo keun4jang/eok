@@ -34,7 +34,7 @@
     [/올리브영|무신사|29CM|지그재그|에이블리|쿠팡|11번가|G마켓|지마켓|옥션|네이버페이|SSG|신세계|롯데백화점|현대백화점|다이소|유니클로|자라|ZARA|H&M|백화점|아울렛/i, '쇼핑'],
     [/병원|의원|약국|치과|한의원|안과|피부과|정형외과|내과/i, '의료'],
     [/SKT|SK텔레콤|KT|LG\s*U\+|엘지유플러스|알뜰폰|통신/i, '통신'],
-    [/관리비|전기|가스|수도|도시가스|한전/i, '주거/관리비'],
+    [/관리비|관리|월세|전세|전기|가스|수도|도시가스|한전/i, '주거/관리비'],
     [/보험|생명|화재|손해/i, '보험'],
     [/학원|교육|강의|클래스|인강/i, '교육'],
   ];
@@ -212,7 +212,7 @@
 
   // 순서 중요: 위에서부터 먼저 맞는 것으로 섹션 종류 결정
   const SECTION = [
-    [/뺀|제외|애매|해지|절약|검토|참고|요약|설명|주의/, 'skip'],
+    [/뺀|제외|애매|해지|절약|검토|참고|요약|설명|주의|계좌|경로|흐름|월별|조회|기간|합계|잔액|분석|결과|판정|근거/, 'skip'],
     [/할부/, 'installment'],
     [/고정\s*수입|수입|입금|급여/, 'income'],
     [/저축|이동|적금|투자/, 'saving'],
@@ -239,8 +239,9 @@
         for (const [re, t] of SECTION) if (re.test(title)) { found = t; break; }
         // 제목은 있는데 아는 섹션이 아니면(계좌 목록, 돈의 경로, 월별 흐름 등) 통째로 건너뛴다.
         // 잔액·이체 합계가 고정지출로 잘못 등록되는 것을 막기 위함. 짧은 일반 문장(20자 이하)은 제목이 아닐 수 있어 # / [ ] 형식만 해당.
+        // 모르는 제목(예: "## 구독", "## 통신비")은 지출 섹션으로 본다. 건너뛸 제목은 위 skip 목록에서 걸러짐.
         if (found) { section = found; sectionDay = ''; }
-        else if (/^(#{1,6}\s|\[)/.test(line)) { section = 'skip'; sectionDay = ''; }
+        else if (/^(#{1,6}\s|\[)/.test(line)) { section = 'expense'; sectionDay = ''; }
         continue;
       }
       if (section === 'skip') continue;
@@ -271,9 +272,13 @@
         // 자유 형식 한 줄: "넷플릭스 17,000원 매월 5일" — 설명 문장은 제외
         const plain = line.replace(/\*\*/g, '');
         if (plain.length > 45 || PROSE.test(plain)) continue;
+        if (!/원|만|₩/.test(plain)) continue;          // 자유 형식 줄은 금액 표시(원·만·₩)가 있어야 항목으로 봄
         amount = parseKoreanAmount(plain);
         if (!amount) continue;
-        name = plain.split(/\s*[-–:：]?\s*\d/)[0].replace(/^[-*•·\d.)\s]+/, '').trim();
+        name = plain.split(/\s*[-–:：]?\s*[₩\d]/)[0].replace(/^[-*•·\d.)\s]+/, '').trim();
+        if (!name) { // "₩9,900 디즈니"처럼 금액이 앞에 오는 경우: 금액·날짜를 걷어낸 나머지
+          name = plain.replace(/₩?\s*[\d,.]+\s*(만|천|원)*/g, ' ').replace(/(매월|매달)?\s*\d{1,2}\s*일|말일/g, ' ').replace(/[-–:：()]/g, ' ').replace(/\s+/g, ' ').trim();
+        }
         if (!name || SKIP_ROW.test(name)) continue;
         const dm = plain.match(/(매월|매달)?\s*(\d{1,2})\s*일|말일/);
         day = dm ? parseDay(dm[0]) : '';
