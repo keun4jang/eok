@@ -1,9 +1,10 @@
 'use strict';
 
 /* ===================== 데이터 ===================== */
-const APP_VERSION = 'v12 · 2026-11-15'; // 앱을 고칠 때마다 sw.js의 CACHE와 함께 올릴 것
+// 버전은 배포(scripts/deploy.sh) 때 version.js에 자동으로 매겨진다 — 손으로 올리지 않음
+const APP_VERSION = window.EOK_VERSION?.n ? `v${window.EOK_VERSION.n}` : 'dev';
 const STORAGE_KEY = 'moneyplan.v1'; // 앱 이름이 '억'으로 바뀌었지만 기존 데이터 호환을 위해 키 유지
-const EXPENSE_CATS = ['식비', '카페/간식', '교통', '쇼핑', '생활용품', '주거/관리비', '통신', '구독', '보험', '문화/여가', '의료', '교육', '경조사', '대출이자', '기타'];
+const EXPENSE_CATS = ['식비', '카페/간식', '교통', '쇼핑', '생활용품', '주거/관리비', '통신', '구독', '보험', '문화/여가', '의료', '교육', '가족·커플', '경조사', '대출이자', '기타'];
 const INCOME_CATS = ['급여', '부수입', '상여', '이자/배당', '용돈', '기타'];
 // 줄이기 쉬운(재량) 지출 카테고리 — 목표 달성 부족분을 여기서 우선 깎는다
 const DISCRETIONARY = ['카페/간식', '쇼핑', '문화/여가', '식비', '생활용품', '기타'];
@@ -12,7 +13,7 @@ const DISCRETIONARY = ['카페/간식', '쇼핑', '문화/여가', '식비', '�
 const CAT_COLORS = {
   '식비': '#C8A96A', '카페/간식': '#B88A6A', '교통': '#7F93B5', '쇼핑': '#A88BA8', '생활용품': '#8FB8A0',
   '주거/관리비': '#6F8FA3', '통신': '#9AA6B8', '구독': '#C48E9A', '보험': '#8C9C7A', '문화/여가': '#D1B98A',
-  '의료': '#7FA8A4', '교육': '#9C8FC4', '경조사': '#C9876F', '대출이자': '#A0705F', '기타': '#8A8F98',
+  '의료': '#7FA8A4', '교육': '#9C8FC4', '가족·커플': '#C79BA0', '경조사': '#C9876F', '대출이자': '#A0705F', '기타': '#8A8F98',
   '급여': '#8FB8A0', '부수입': '#A3C2AE', '상여': '#C8A96A', '이자/배당': '#7FA8A4', '용돈': '#B5A3C4',
 };
 const catColor = c => CAT_COLORS[c] || '#8A8F98';
@@ -181,6 +182,7 @@ function render() {
   $('#monthPicker').style.visibility = (currentTab === 'home' || currentTab === 'tx') ? 'visible' : 'hidden';
   $('#fab').style.display = (currentTab === 'home' || currentTab === 'tx') ? '' : 'none';
   ({ home: renderHome, tx: renderTx, fixed: renderFixed, goals: renderGoals, insights: renderInsights })[currentTab]();
+  view.insertAdjacentHTML('beforeend', `<footer class="credit">억 ${APP_VERSION} · 앱 제작자 KEUN</footer>`);
 }
 
 function renderHome() {
@@ -195,7 +197,7 @@ function renderHome() {
       <div class="hero-label">${monthLabel(viewMonth)} 남은 돈</div>
       <div class="hero-amount ${s.net < 0 ? 'neg' : ''}">${won(s.net)}</div>
       <div class="hero-bar"><i style="width:${spentPct}%"></i></div>
-      <div class="hero-meta"><span>수입의 ${s.income > 0 ? pct(s.expense, s.income) : 0}% 지출</span><span>저축률 ${s.income > 0 ? rate + '%' : '–'}</span></div>
+      <div class="hero-meta"><span>지출 ${s.income > 0 ? pct(s.expense, s.income) : 0}%</span><span>저축률 ${s.income > 0 ? rate + '%' : '–'}</span></div>
       <div class="hero-split">
         <div><span>수입</span><b>${won(s.income)}</b></div>
         <div><span>지출</span><b>${won(s.expense)}</b></div>
@@ -217,11 +219,11 @@ function renderHome() {
         <ul class="list cats">${cats.map(([c, v]) => `
           <li><div class="li-main">${catIcon(c)}<div><div class="title">${esc(c)}</div><div class="sub">${v / s.varExpense < 0.01 ? '1% 미만' : pct(v, s.varExpense) + '%'}</div></div></div>
           <div class="amount">${won(v)}</div></li>`).join('')}</ul>`
-        : `<div class="empty">아직 지출 기록이 없어요<br><span>오른쪽 아래 ＋ 버튼으로 시작하세요</span></div>`}
+        : `<div class="empty">기록 없음</div>`}
     </section>
 
     <section class="card">
-      <div class="row"><h2>최근 내역</h2>${s.txs.length ? `<button class="link-btn" data-goto="tx">전체 보기 ›</button>` : ''}</div>
+      <div class="row"><h2>최근 내역</h2>${s.txs.length ? `<button class="link-btn" data-goto="tx">전체 ›</button>` : ''}</div>
       ${recent.length ? `<ul class="list">${recent.map(txItem).join('')}</ul>` : `<div class="empty">기록 없음</div>`}
     </section>
     ${state.goals.length ? renderGoalSummary() : ''}
@@ -244,7 +246,7 @@ function donut(cats, total) {
 
 function renderGoalSummary() {
   const avg = avgStats();
-  return `<section class="card"><div class="row"><h2>목표</h2><button class="link-btn" data-goto="goals">자세히 ›</button></div>
+  return `<section class="card"><div class="row"><h2>목표</h2><button class="link-btn" data-goto="goals">›</button></div>
     ${state.goals.map(g => { const p = goalPlan(g, avg); return `
       <div class="cat-row">
         <div class="row"><span class="title">${esc(g.name)}</span><span class="muted">${p.progress}% · 월 ${shortWon(p.need)}원</span></div>
@@ -279,20 +281,19 @@ function renderTx() {
     </div>
     <button class="sms-cta" data-sms>
       <span class="cat-ic" style="--c:var(--gold)">✉</span>
-      <span><b>문자·카톡으로 한 번에 입력</b><small>결제 알림을 복사해서 붙여넣기</small></span><span class="chev">›</span>
+      <span><b>문자·카톡 입력</b></span><span class="chev">›</span>
     </button>
     <section class="card grid2 compact">
       <div class="stat"><div class="label">기록된 수입</div><div class="value income">${won(s.varIncome)}</div></div>
       <div class="stat"><div class="label">기록된 지출</div><div class="value expense">${won(s.varExpense)}</div></div>
     </section>
     ${txMode === 'cal' ? calendar(s) : ''}
-    ${selectedDay ? `<div class="row filter-chip"><span>선택한 날짜만 보는 중</span><button class="link-btn" data-clear-day>전체 보기 ✕</button></div>` : ''}
+    ${selectedDay ? `<div class="row filter-chip"><span>📅 선택한 날</span><button class="link-btn" data-clear-day>✕</button></div>` : ''}
     ${list.length ? Object.entries(groups).map(([d, ts]) => `
       <section class="card">
         <div class="row day-head"><span>${dayLabel(d)}</span><span class="amount">${dayTotal(ts)}</span></div>
         <ul class="list">${ts.map(txItem).join('')}</ul>
-      </section>`).join('') : `<section class="card"><div class="empty">${selectedDay ? '이 날' : monthLabel(viewMonth)} 기록이 없어요</div></section>`}
-    <p class="muted foot">고정 수입·지출은 '고정' 탭에서 관리하며 매달 자동 합산됩니다.</p>
+      </section>`).join('') : `<section class="card"><div class="empty">기록 없음</div></section>`}
   `;
 }
 
@@ -334,25 +335,25 @@ function renderFixed() {
       <div class="amount ${f.type}">${won(f.amount)}</div></li>`;
   view.innerHTML = `
     <section class="card">
-      <div class="muted">이번 달 고정지출 합계</div>
+      <div class="muted">이번 달 고정지출</div>
       <div class="big expense">${won(expTotal)}</div>
-      <div class="muted">${incTotal ? `고정수입 ${won(incTotal)}의 ${pct(expTotal, incTotal)}%` : '고정수입 미등록'}${inst.length ? ` · 할부 ${won(sum(inst))} 포함` : ''}</div>
-      ${endingSoon ? `<div class="muted">이번 달로 끝나는 할부 ${won(endingSoon)} → 다음 달부터 그만큼 여유</div>` : ''}
+      <div class="muted">${incTotal ? `수입 대비 ${pct(expTotal, incTotal)}%` : '수입 미등록'}${inst.length ? ` · 할부 ${won(sum(inst))}` : ''}</div>
+      ${endingSoon ? `<div class="muted">다음 달 −${won(endingSoon)} (할부 끝)</div>` : ''}
     </section>
     <button class="sms-cta" data-import-fixed>
       <span class="cat-ic" style="--c:var(--gold)">⇣</span>
-      <span><b>목록 붙여넣어 한 번에 등록</b><small>카드사·은행 분석 결과, 표, 메모 등</small></span><span class="chev">›</span>
+      <span><b>목록 붙여넣기</b></span><span class="chev">›</span>
     </button>
     <section class="card">
-      <div class="row"><h2>고정수입</h2><button class="btn sm ghost" data-add-fixed="income">＋ 추가</button></div>
-      ${inc.length ? `<ul class="list">${inc.map(item).join('')}</ul>` : `<div class="empty">월급처럼 매달 들어오는 돈을 등록하세요.</div>`}
+      <div class="row"><h2>수입</h2><button class="btn sm ghost" data-add-fixed="income">＋ 추가</button></div>
+      ${inc.length ? `<ul class="list">${inc.map(item).join('')}</ul>` : `<div class="empty">없음</div>`}
     </section>
     <section class="card">
-      <div class="row"><h2>고정지출</h2><button class="btn sm ghost" data-add-fixed="expense">＋ 추가</button></div>
-      ${exp.length ? `<ul class="list">${exp.map(item).join('')}</ul>` : `<div class="empty">월세, 통신비, 보험, 구독, 대출이자 등을 등록하세요.</div>`}
+      <div class="row"><h2>지출</h2><button class="btn sm ghost" data-add-fixed="expense">＋ 추가</button></div>
+      ${exp.length ? `<ul class="list">${exp.map(item).join('')}</ul>` : `<div class="empty">없음</div>`}
     </section>
-    ${inst.length ? `<section class="card"><h2>할부 <span class="muted">· 종료 월이 지나면 자동으로 빠져요</span></h2><ul class="list">${inst.map(item).join('')}</ul></section>` : ''}
-    ${ended.length ? `<section class="card"><div class="row"><h2 class="muted">끝난 할부 ${ended.length}건</h2><button class="link-btn" data-clear-ended>정리하기</button></div></section>` : ''}
+    ${inst.length ? `<section class="card"><h2>할부</h2><ul class="list">${inst.map(item).join('')}</ul></section>` : ''}
+    ${ended.length ? `<section class="card"><div class="row"><h2 class="muted">끝난 할부 ${ended.length}건</h2><button class="link-btn" data-clear-ended>정리</button></div></section>` : ''}
   `;
 }
 const activeFixed = m => state.fixed.filter(f => !f.until || m <= f.until);
@@ -367,10 +368,9 @@ const KIND_LABEL = { income: '수입', expense: '지출', installment: '할부',
 
 function openFixedImportSheet(initialText = '') {
   fixedItems = [];
-  openSheet(`<h2>고정 항목 한 번에 등록</h2>
-    <p class="muted" style="margin:-8px 0 10px">카드사·은행 분석 결과나 표, "넷플릭스 17,000원 매월 5일" 같은 메모를 붙여넣으세요. [고정수입]·[고정지출]·[할부] 같은 제목이 있으면 그대로 구분합니다.</p>
+  openSheet(`<h2>목록 붙여넣기</h2>
     <div class="row" style="margin-bottom:8px">
-      <button type="button" class="btn sm ghost" data-act="clip">📋 클립보드에서 붙여넣기</button>
+      <button type="button" class="btn sm ghost" data-act="clip">📋 붙여넣기</button>
       <button type="button" class="link-btn" data-act="clear">지우기</button>
     </div>
     <textarea name="fixedText" rows="6" placeholder="| 항목명 | 월 금액 | 결제일 | 카테고리 |&#10;| 월세 | 650,000원 | 1일 | 주거/관리비 |"></textarea>
@@ -413,14 +413,14 @@ function buildFixedItems(text) {
 function renderFixedPreview() {
   const box = form.querySelector('#fixedPreview');
   if (!fixedItems.length) {
-    box.innerHTML = form.querySelector('textarea').value.trim() ? `<div class="empty">항목을 찾지 못했어요<br><span>한 줄에 이름과 금액(원)이 함께 있어야 합니다</span></div>` : '';
+    box.innerHTML = form.querySelector('textarea').value.trim() ? `<div class="empty">인식 실패</div>` : '';
     return;
   }
   const on = fixedItems.filter(x => x.on);
   const tot = t => sum(on.filter(x => x.type === t));
-  box.innerHTML = `<div class="muted" style="margin:14px 0 6px">${fixedItems.length}건 인식 · 선택한 항목: 수입 ${won(tot('income'))} / 지출 ${won(tot('expense'))}</div>
-    ${fixedItems.some(x => x.kind === 'card') ? `<div class="tip warn"><b>카드대금은 기본 제외</b>카드 결제 항목을 따로 등록하면 같은 돈이 두 번 계산됩니다.</div>` : ''}
-    ${fixedItems.some(x => x.kind === 'installment') ? `<div class="hint" style="margin-bottom:6px">할부는 종료 월이 지나면 자동으로 합계에서 빠집니다. 원래 결제를 내역에 일시불로 따로 기록했다면 체크를 해제하세요(이중 계산).</div>` : ''}
+  box.innerHTML = `<div class="muted" style="margin:14px 0 6px">${fixedItems.length}건 · 수입 ${won(tot('income'))} · 지출 ${won(tot('expense'))}</div>
+    ${fixedItems.some(x => x.kind === 'card') ? `<div class="hint">카드대금 제외 (중복)</div>` : ''}
+    ${fixedItems.some(x => x.kind === 'installment') ? '' : ''}
     ${fixedItems.map((it, i) => `
     <div class="sms-item ${it.on ? '' : 'off'}" data-i="${i}">
       <div class="row">
@@ -451,45 +451,45 @@ function renderGoals() {
   const avg = avgStats();
   view.innerHTML = `
     <section class="card">
-      <div class="row"><h2>내 목표</h2><button class="btn sm" data-add-goal>＋ 목표 추가</button></div>
-      <p class="muted">월 여유자금 <b>${won(avg.net)}</b> · ${basisText(avg)}${avg.hasData ? '' : ' (변동지출 기록 없음 — 고정 항목만 반영)'}.<br>목표가 여러 개면 여유자금을 각 목표의 필요 적립액 비율로 나눠 계산합니다.</p>
+      <div class="row"><h2>목표</h2><button class="btn sm" data-add-goal>＋</button></div>
+      <div class="row"><span class="muted">월 여유</span><b>${won(avg.net)}</b></div>
     </section>
-    ${state.goals.length ? state.goals.map(g => goalCard(g, avg)).join('') : `<section class="card"><div class="empty">목표 금액과 기한을 정하면<br>매달 얼마를 모아야 하는지, 무엇을 줄이면 되는지 알려드려요.</div></section>`}
+    ${state.goals.length ? state.goals.map(g => goalCard(g, avg)).join('') : `<section class="card"><div class="empty">목표 없음</div></section>`}
   `;
 }
 
 function goalCard(g, avg) {
   const p = goalPlan(g, avg);
   const ok = p.shortfall <= 0;
-  const eta = p.etaMonths === Infinity ? '현재 여유자금으로는 도달 불가' : `${shiftMonth(ym(new Date()), p.etaMonths).replace('-', '년 ')}월 (${p.etaMonths}개월 후)`;
+  const eta = p.etaMonths === Infinity ? '도달 불가' : `${shiftMonth(ym(new Date()), p.etaMonths).replace('-', '.')}`;
   let advice = '';
   if (ok) {
-    advice = `<div class="tip good"><b>현재 페이스로 달성 가능</b>매달 <b>${won(p.need)}</b>을 이 목표 전용 계좌로 <b>월급날 자동이체</b> 걸어두세요. 남는 돈을 모으는 방식은 대부분 실패합니다.</div>`;
+    advice = `<div class="tip good"><b>✓ 달성 가능</b></div>`;
   } else {
-    advice = `<div class="tip warn"><b>매달 ${won(p.shortfall)} 부족</b>지금 여유자금 중 이 목표 몫은 월 ${won(p.share)}입니다.</div>`;
+    advice = `<div class="tip warn"><b>월 ${won(p.shortfall)} 부족</b></div>`;
     if (p.cuts.length) {
-      advice += `<h3>이렇게 줄이면 ${p.cutsCover ? '메울 수 있어요' : '일부 메울 수 있어요'}</h3>
-        <table class="mini">${p.cuts.map(c => `<tr><td>${esc(c.category)} (현재 월 ${shortWon(c.current)}원)</td><td>−${won(c.cut)}</td></tr>`).join('')}</table>`;
+      advice += `<h3>줄일 곳</h3>
+        <table class="mini">${p.cuts.map(c => `<tr><td>${esc(c.category)}</td><td>−${won(c.cut)}</td></tr>`).join('')}</table>`;
     }
     if (!p.cutsCover) {
-      advice += `<div class="tip warn"><b>지출 절감만으로는 부족</b>남는 부족분 월 ${won(p.remainingAfterCuts)}. 선택지: ① 기한을 늘리기 (현재 페이스 기준 도달: ${eta}) ② 목표 금액 조정 ③ 고정지출(통신·보험·구독) 재점검 ④ 수입 늘리기.</div>`;
+      advice += `<div class="hint">그래도 월 ${won(p.remainingAfterCuts)} 부족 → 기한·금액 조정</div>`;
     }
   }
-  const horizon = p.months <= 12 ? '1년 이내 — 원금 손실 위험 있는 투자는 피하고 예·적금/파킹통장/CMA 권장'
-    : p.months <= 36 ? '1~3년 — 예금·채권형 위주, 주식 비중은 작게'
-    : '3년 이상 — 일부를 분산된 지수 ETF 등에 장기투자하는 것을 고려할 수 있음 (손실 가능)';
+  const horizon = p.months <= 12 ? '예·적금'
+    : p.months <= 36 ? '예금·채권 위주'
+    : '일부 분산 ETF';
   return `<section class="card">
     <div class="row"><h2>${esc(g.name)}</h2><button class="link-btn" data-edit-goal="${g.id}">수정</button></div>
     <div class="row"><span class="big">${shortWon(g.saved)}</span><span class="muted">/ ${won(g.target)}</span></div>
     <div class="bar ${ok ? '' : 'over'}"><i style="width:${Math.min(100, p.progress)}%"></i></div>
     <table class="mini" style="margin-top:10px">
-      <tr><td>기한</td><td>${g.deadline.replace('-', '년 ')}월 (${p.months}개월 남음)</td></tr>
-      <tr><td>가정 연수익률</td><td>${g.rate}%</td></tr>
-      <tr><td>필요 월 적립액</td><td><b>${won(p.need)}</b></td></tr>
-      <tr><td>현재 페이스 도달 시점</td><td>${eta}</td></tr>
+      <tr><td>기한</td><td>${g.deadline.replace('-', '.')} · ${p.months}개월</td></tr>
+      <tr><td>수익률</td><td>${g.rate}%</td></tr>
+      <tr><td>월 필요</td><td><b>${won(p.need)}</b></td></tr>
+      <tr><td>예상 도달</td><td>${eta}</td></tr>
     </table>
     ${advice}
-    <p class="muted">기간: ${horizon}</p>
+    <div class="muted" style="margin-top:8px">💡 ${horizon}</div>
   </section>`;
 }
 
@@ -503,39 +503,36 @@ function renderInsights() {
   view.innerHTML = `
     ${accountCardHtml()}
     <section class="card">
-      <h2>절약 포인트</h2>
-      <p class="muted">${basisText(avg)} · 기준치는 일반적인 가이드일 뿐 정답이 아닙니다.</p>
-      ${tips.length ? tips.map(t => `<div class="tip ${t.level || ''}"><b>${esc(t.title)}</b>${t.body}</div>`).join('') : `<div class="empty">기록이 쌓이면(최소 2~4주) 분석해드려요.</div>`}
+      <h2>절약</h2>
+      ${tips.length ? tips.map(t => `<details class="tip ${t.level || ''}"><summary>${esc(t.title)}</summary><div>${t.body}</div></details>`).join('') : `<div class="empty">기록 쌓이는 중</div>`}
     </section>
 
     <section class="card">
-      <h2>투자 순서 가이드</h2>
-      <p class="muted">이 앱은 실시간 시장 정보를 모릅니다. "요즘 뭐가 오른다"는 추천은 하지 않으며, 대신 개인 재무 상황에 맞는 <b>순서</b>를 알려드립니다. 금리·세제 혜택은 바뀌므로 가입 전 반드시 최신 조건을 확인하세요.</p>
+      <h2>투자 순서</h2>
       <ol class="ladder">
-        <li class="${st.highDebt ? '' : 'done'}"><b>고금리 빚부터 갚기</b> — 카드론·현금서비스·리볼빙(연 10%+)을 갚는 건 확정 수익률 10%+ 투자와 같습니다. ${st.highDebt ? '<span class="pill bad">해당</span>' : '<span class="pill ok">없음</span>'}</li>
-        <li class="${efOk ? 'done' : ''}"><b>비상금 3~6개월치</b> — 월 지출 기준 최소 ${won(efTarget)}. 파킹통장·CMA·MMF처럼 바로 꺼낼 수 있는 곳에. 현재 ${won(st.emergency)} ${efOk ? '<span class="pill ok">충족</span>' : '<span class="pill bad">부족</span>'}</li>
-        <li><b>세제혜택 계좌 먼저 채우기</b> — 연금저축·IRP(세액공제, 대신 55세 전 인출 시 불이익), ISA(비과세·분리과세). 같은 상품도 이 계좌에서 사면 세금이 줄어듭니다.</li>
-        <li><b>장기 돈은 넓게 분산</b> — 3년 이상 안 쓸 돈은 국내외 주식·채권 지수 ETF 같은 저비용 분산 상품을 매달 정액 적립하는 방식이 개인에게 가장 재현성이 높습니다. 손실 가능성은 항상 있습니다.</li>
-        <li><b>개별 종목·코인·레버리지</b> — 하고 싶다면 전체 자산의 일부, 잃어도 생활에 지장 없는 금액만.</li>
+        <li class="${st.highDebt ? '' : 'done'}">고금리 빚 상환 ${st.highDebt ? '<span class="pill bad">해당</span>' : '<span class="pill ok">없음</span>'}</li>
+        <li class="${efOk ? 'done' : ''}">비상금 ${shortWon(efTarget)}원 ${efOk ? '<span class="pill ok">충족</span>' : '<span class="pill bad">부족</span>'}</li>
+        <li>연금저축 · IRP · ISA</li>
+        <li>분산 ETF 적립</li>
+        <li>개별주·코인은 소액만</li>
       </ol>
     </section>
 
     <section class="card">
-      <h2>내 상태 입력</h2>
-      <label>현재 비상금 (바로 쓸 수 있는 현금성 자산)</label>
+      <h2>내 상태</h2>
+      <label>비상금</label>
       <input id="setEmergency" inputmode="numeric" value="${st.emergency ? st.emergency.toLocaleString('ko-KR') : ''}" placeholder="0" />
-      <label style="display:flex;align-items:center;gap:8px;color:var(--text)"><input type="checkbox" id="setDebt" style="width:auto" ${st.highDebt ? 'checked' : ''}/> 연 10% 이상 고금리 대출/카드빚이 있다</label>
+      <label style="display:flex;align-items:center;gap:8px;color:var(--text)"><input type="checkbox" id="setDebt" style="width:auto" ${st.highDebt ? 'checked' : ''}/> 고금리 빚 있음</label>
     </section>
 
     <section class="card">
-      <div class="row"><h2>데이터</h2><span class="muted">억 ${APP_VERSION}</span></div>
-      <p class="muted">데이터는 이 기기에 먼저 저장되고, 로그인하면 클라우드와 동기화됩니다. 로그인하지 않으면 이 기기에만 있으니 <b>주기적으로 백업하세요.</b></p>
+      <h2>데이터</h2>
       <div class="actions">
-        <button class="btn ghost" id="exportBtn">백업 내보내기</button>
-        <button class="btn ghost" id="importBtn">백업 불러오기</button>
+        <button class="btn ghost" id="exportBtn">백업</button>
+        <button class="btn ghost" id="importBtn">복원</button>
       </div>
       <input type="file" id="importFile" accept="application/json,.json" hidden />
-      <div class="actions"><button class="btn ghost" id="updateBtn">업데이트 확인</button><button class="btn danger" id="resetBtn">전체 초기화</button></div>
+      <div class="actions"><button class="btn ghost" id="updateBtn">업데이트</button><button class="btn danger" id="resetBtn">초기화</button></div>
     </section>
   `;
 }
@@ -544,31 +541,29 @@ function accountCardHtml() {
   const st = window.EokSync?.status() || { phase: 'loading' };
   const time = st.last ? new Date(st.last).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' }) : '';
   let body;
-  if (st.phase === 'noconfig') body = `<p class="muted">클라우드 설정 전이에요. 지금은 이 기기에만 저장됩니다.</p>`;
-  else if (st.phase === 'loading') body = `<p class="muted">로그인 확인 중…</p>`;
-  else if (st.phase === 'offline') body = `<p class="muted">오프라인 — 연결되면 로그인할 수 있어요. 기록은 이 기기에 계속 저장됩니다.</p>`;
+  if (st.phase === 'noconfig') body = `<p class="muted">기기 저장</p>`;
+  else if (st.phase === 'loading') body = `<p class="muted">…</p>`;
+  else if (st.phase === 'offline') body = `<p class="muted">오프라인</p>`;
   else if (st.phase === 'error') body = `<p class="muted">${esc(st.error)}</p>`;
-  else if (!st.user) body = `<p class="muted">로그인하면 폰을 바꾸거나 다른 기기에서도 같은 데이터를 볼 수 있어요.</p>
-      <button class="btn block" id="loginBtn">Google로 로그인</button>`;
+  else if (!st.user) body = `<button class="btn block" id="loginBtn">Google 로그인</button>`;
   else body = `<div class="row"><div><div class="title">${esc(st.user.name || '')}</div><div class="muted">${esc(st.user.email || '')}</div></div>
       <button class="link-btn" id="logoutBtn">로그아웃</button></div>
-      <div class="row" style="margin-top:8px"><span class="muted">${st.phase === 'syncing' ? '동기화 중…' : time ? `마지막 동기화 ${time}` : '동기화 대기'}</span>
-      <button class="btn sm ghost" id="syncBtn">지금 동기화</button></div>
-      <h3>결제 알림 자동 수집</h3>
-      <p class="muted" style="margin:0 0 8px">폰 자동화 앱(MacroDroid)이 카드 문자·카톡 알림을 클라우드 수집함으로 보내면, 억을 열 때 자동 등록됩니다.</p>
+      <div class="row" style="margin-top:8px"><span class="muted">${st.phase === 'syncing' ? '☁ …' : time ? `☁ ${time}` : '☁'}</span>
+      <button class="btn sm ghost" id="syncBtn">↻</button></div>
+      <h3>자동 수집</h3>
       <div id="dropBox">${dropHtml()}</div>`;
-  return `<section class="card" id="accountCard"><h2>계정</h2>${body}${st.error && st.user ? `<div class="tip warn"><b>동기화 문제</b>${esc(st.error)}</div>` : ''}</section>`;
+  return `<section class="card" id="accountCard"><h2>계정</h2>${body}${st.error && st.user ? `<div class="hint">⚠ ${esc(st.error)}</div>` : ''}</section>`;
 }
 let dropShown = null; // 자동 수집 설정값(한 번 불러오면 카드 다시 그려도 유지)
 function dropHtml() {
-  if (!dropShown) return '<button class="btn sm ghost" id="dropBtn">설정값 보기</button>';
-  if (dropShown.error) return `<p class="muted">불러오기 실패: ${esc(dropShown.error)}</p><button class="btn sm ghost" id="dropBtn">다시 시도</button>`;
-  if (dropShown.loading) return '<p class="muted">불러오는 중…</p>';
+  if (!dropShown) return '<button class="btn sm ghost" id="dropBtn">설정</button>';
+  if (dropShown.error) return `<p class="muted">⚠ ${esc(dropShown.error)}</p><button class="btn sm ghost" id="dropBtn">↻</button>`;
+  if (dropShown.loading) return '<p class="muted">…</p>';
   const body = `{"fields":{"text":{"stringValue":"[notification_title] [notification]"},"key":{"stringValue":"${dropShown.key}"}}}`;
   return `
-    <label>① 요청 주소 (POST)</label><div class="codebox" id="dropUrl">${esc(dropShown.url)}</div><button class="link-btn" data-copy="dropUrl">복사</button>
-    <label>② 본문 (Content-Type: application/json)</label><div class="codebox" id="dropBody">${esc(body)}</div><button class="link-btn" data-copy="dropBody">복사</button>
-    <p class="hint">열쇠(key)를 아는 사람은 수집함에 글을 넣을 수 있으니 공유하지 마세요. 읽기·삭제는 본인 로그인으로만 가능합니다.</p>`;
+    <label>URL (POST)</label><div class="codebox" id="dropUrl">${esc(dropShown.url)}</div><button class="link-btn" data-copy="dropUrl">복사</button>
+    <label>Body (JSON)</label><div class="codebox" id="dropBody">${esc(body)}</div><button class="link-btn" data-copy="dropBody">복사</button>
+    <p class="hint">🔒 공유 금지</p>`;
 }
 async function showDrop() {
   dropShown = { loading: true }; refreshAccount();
@@ -592,7 +587,7 @@ function ingest(texts) {
     added++;
   }
   if (added || removed) { save(); if (!sheet.open) render(); }
-  toast(`자동 수집 ${texts.length}건 → ${added}건 등록${removed ? ` · ${removed}건 취소 반영` : ''}${texts.length - added - removed > 0 ? ` · ${texts.length - added - removed}건 제외(중복·고정·인식 불가)` : ''}`);
+  toast(`자동 ${added}건 등록${removed ? ` · 취소 ${removed}` : ''}`);
 }
 window.EokApp = { getState: () => state, adopt, refreshAccount, ingest };
 
@@ -713,7 +708,7 @@ const moneyVal = n => (n ? Number(n).toLocaleString('ko-KR') : '');
 function openTxSheet(t) {
   const isNew = !t;
   t = t || { type: 'expense', amount: '', category: '식비', memo: '', date: selectedDay || (viewMonth === ym(new Date()) ? todayStr() : viewMonth + '-01') };
-  openSheet(`<div class="row"><h2>${isNew ? '내역 추가' : '내역 수정'}</h2>${isNew ? '<button type="button" class="link-btn" data-act="sms">문자·카톡으로 입력 ›</button>' : ''}</div>
+  openSheet(`<div class="row"><h2>${isNew ? '내역 추가' : '내역 수정'}</h2>${isNew ? '<button type="button" class="link-btn" data-act="sms">✉ 문자</button>' : ''}</div>
     ${typeSeg(t.type)}
     <label>금액</label><input name="amount" data-money inputmode="numeric" required value="${moneyVal(t.amount)}" placeholder="0" />
     <label>카테고리</label><select name="category">${catOptions(t.type, t.category)}</select>
@@ -737,9 +732,8 @@ function openFixedSheet(f, type) {
     <label>이름</label><input name="name" required value="${esc(f.name)}" placeholder="예: 월세, 넷플릭스, 월급" maxlength="30" />
     <label>월 금액</label><input name="amount" data-money inputmode="numeric" required value="${moneyVal(f.amount)}" placeholder="0" />
     <label>카테고리</label><select name="category">${catOptions(f.type, f.category)}</select>
-    <label>매월 결제/입금일 (선택)</label><input name="day" type="number" min="1" max="31" value="${f.day || ''}" />
-    <label>마지막 달 (할부 등 끝나는 항목만)</label><input name="until" type="month" value="${f.until || ''}" />
-    <div class="hint">연 단위 지출(자동차보험 등)은 12로 나눈 금액을 넣으세요.</div>`,
+    <label>매월 (일)</label><input name="day" type="number" min="1" max="31" value="${f.day || ''}" />
+    <label>종료 월</label><input name="until" type="month" value="${f.until || ''}" />`,
     fd => {
       const amount = parseAmount(fd.amount);
       if (!amount || !fd.name.trim()) { alert('이름과 금액을 입력하세요'); return false; }
@@ -757,8 +751,8 @@ function openGoalSheet(g) {
     <label>목표 금액</label><input name="target" data-money inputmode="numeric" required value="${moneyVal(g.target)}" />
     <label>현재 모은 금액</label><input name="saved" data-money inputmode="numeric" value="${moneyVal(g.saved)}" placeholder="0" />
     <label>목표 시점</label><input name="deadline" type="month" required value="${g.deadline}" min="${shiftMonth(ym(new Date()), 1)}" />
-    <label>가정 연수익률 (%)</label><input name="rate" type="number" step="0.1" min="0" max="20" value="${g.rate}" />
-    <div class="hint">예·적금이면 세후 2~3%대, 주식형 장기투자도 보수적으로 4~6% 정도로 잡는 게 안전합니다. 높게 잡을수록 계획이 낙관적이 됩니다.</div>`,
+    <label>연수익률 %</label><input name="rate" type="number" step="0.1" min="0" max="20" value="${g.rate}" />
+    <div class="hint">예금 2~3 · 주식 4~6</div>`,
     fd => {
       const target = parseAmount(fd.target);
       if (!target || !fd.name.trim()) { alert('이름과 목표 금액을 입력하세요'); return false; }
@@ -774,10 +768,9 @@ let smsItems = [];
 
 function openSmsSheet(initialText = '') {
   smsItems = [];
-  openSheet(`<h2>문자·카톡 알림으로 입력</h2>
-    <p class="muted" style="margin:-8px 0 10px">카드 승인·은행 입출금 문자나 카카오톡 알림톡을 복사해서 붙여넣으세요. 여러 건을 한 번에 붙여넣어도 됩니다.</p>
+  openSheet(`<h2>✉ 문자·카톡</h2>
     <div class="row" style="margin-bottom:8px">
-      <button type="button" class="btn sm ghost" data-act="clip">📋 클립보드에서 붙여넣기</button>
+      <button type="button" class="btn sm ghost" data-act="clip">📋 붙여넣기</button>
       <button type="button" class="link-btn" data-act="clear">지우기</button>
     </div>
     <textarea name="smsText" rows="5" placeholder="[Web발신]&#10;신한카드(1234)승인 홍*동 12,500원(일시불)11/15 12:34 스타벅스"></textarea>
@@ -838,11 +831,11 @@ function renderSmsPreview() {
   const box = form.querySelector('#smsPreview');
   const sk = buildSmsItems.skipped || 0;
   if (!smsItems.length) {
-    box.innerHTML = form.querySelector('textarea').value.trim() ? `<div class="empty">결제·입출금 내용을 찾지 못했어요.<br><span>금액이 '원'과 함께 있는지 확인해주세요.</span></div>` : '';
+    box.innerHTML = form.querySelector('textarea').value.trim() ? `<div class="empty">인식 실패</div>` : '';
     form.querySelector('button[type=submit]').textContent = saveLabel();
     return;
   }
-  box.innerHTML = `<div class="muted" style="margin:14px 0 6px">${smsItems.length}건 인식${sk ? ` · ${sk}건은 결제 문자가 아니라서 제외` : ''} — 저장 전에 확인·수정하세요</div>
+  box.innerHTML = `<div class="muted" style="margin:14px 0 6px">${smsItems.length}건${sk ? ` · 제외 ${sk}` : ''}</div>
     ${smsItems.map((it, i) => `
     <div class="sms-item ${it.on ? '' : 'off'}" data-i="${i}">
       <div class="row">
@@ -851,9 +844,9 @@ function renderSmsPreview() {
           ${it.dup ? '<span class="pill bad">이미 있음?</span>' : ''}${it.fixedHit ? '<span class="pill bad">고정 항목</span>' : ''}</label>
         <input class="amt ${it.type}" data-f="amount" inputmode="numeric" value="${moneyVal(it.amount)}">
       </div>
-      ${it.fixedHit ? `<div class="hint">고정 탭의 '${esc(it.fixedHit)}'와 같은 결제로 보여요. 저장하면 이중 계산됩니다.</div>` : ''}
+      ${it.fixedHit ? `<div class="hint">= ${esc(it.fixedHit)}</div>` : ''}
       ${it.type === 'cancel'
-        ? `<div class="hint">${it.cancelTarget ? '체크하면 기존 결제 내역 1건을 삭제합니다' : '취소할 원래 결제 내역을 찾지 못했어요 (저장 안 함)'}</div>`
+        ? `<div class="hint">${it.cancelTarget ? '원 결제 삭제' : '원 결제 없음'}</div>`
         : `<div class="sms-fields">
             <input data-f="memo" value="${esc(it.memo)}" maxlength="40">
             <select data-f="category">${catOptions(it.type, it.category)}</select>

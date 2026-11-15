@@ -21,7 +21,7 @@ async function init() {
     auth.getRedirectResult(fb.authInst).catch(e => set({ error: msg(e) }));
     auth.onAuthStateChanged(fb.authInst, onUser);
   } catch (e) {
-    set({ phase: navigator.onLine ? 'error' : 'offline', error: navigator.onLine ? '로그인 모듈을 불러오지 못했어요 — 잠시 후 자동 재시도' : '' });
+    set({ phase: navigator.onLine ? 'error' : 'offline', error: navigator.onLine ? '⚠ 연결 실패 · 재시도 중' : '' });
     const retry = () => { if (!fb && st.phase !== 'loading') { set({ phase: 'loading', error: '' }); init(); } };
     window.addEventListener('online', retry, { once: true });
     if (navigator.onLine && (init.tries = (init.tries || 0) + 1) <= 3) setTimeout(retry, 15000 * init.tries);
@@ -34,7 +34,7 @@ async function onUser(user) {
   const local = window.EokApp.getState();
   const hasLocal = (local.tx?.length || 0) + (local.fixed?.length || 0) + (local.goals?.length || 0) > 0;
   if (prev && prev !== user.uid && hasLocal &&
-      !confirm(`다른 계정(${user.email})으로 로그인했어요.\n이 기기의 데이터를 이 계정에 합칠까요?\n취소하면 로그아웃합니다.`)) {
+      !confirm(`${user.email}\n이 기기 데이터를 합칠까요?`)) {
     await fb.auth.signOut(fb.authInst); return;
   }
   localStorage.setItem(UID_KEY, user.uid);
@@ -99,15 +99,15 @@ async function login() {
 }
 async function logout() {
   if (!fb) return;
-  if (!confirm('로그아웃할까요? 이 기기의 데이터는 그대로 남고, 클라우드 동기화만 멈춥니다.')) return;
+  if (!confirm('로그아웃? (기기 데이터는 유지)')) return;
   await fb.auth.signOut(fb.authInst);
 }
 
 function msg(e) {
   const c = e?.code || '';
-  if (c.includes('unauthorized-domain')) return '이 주소가 Firebase 승인된 도메인에 없어요 (설정 필요)';
-  if (c.includes('permission-denied')) return '클라우드 권한 오류 (Firestore 보안 규칙 확인 필요)';
-  if (c.includes('network') || c.includes('unavailable')) return '네트워크 오류 — 잠시 후 자동 재시도';
+  if (c.includes('unauthorized-domain')) return '⚠ 승인되지 않은 도메인';
+  if (c.includes('permission-denied')) return '⚠ 권한 오류';
+  if (c.includes('network') || c.includes('unavailable')) return '⚠ 네트워크 오류';
   return e?.message || String(e);
 }
 
