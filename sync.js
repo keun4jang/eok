@@ -21,8 +21,10 @@ async function init() {
     auth.getRedirectResult(fb.authInst).catch(e => set({ error: msg(e) }));
     auth.onAuthStateChanged(fb.authInst, onUser);
   } catch (e) {
-    set({ phase: navigator.onLine ? 'error' : 'offline', error: navigator.onLine ? '로그인 모듈을 불러오지 못했어요' : '' });
-    window.addEventListener('online', () => { if (!fb) { set({ phase: 'loading', error: '' }); init(); } }, { once: true });
+    set({ phase: navigator.onLine ? 'error' : 'offline', error: navigator.onLine ? '로그인 모듈을 불러오지 못했어요 — 잠시 후 자동 재시도' : '' });
+    const retry = () => { if (!fb && st.phase !== 'loading') { set({ phase: 'loading', error: '' }); init(); } };
+    window.addEventListener('online', retry, { once: true });
+    if (navigator.onLine && (init.tries = (init.tries || 0) + 1) <= 3) setTimeout(retry, 15000 * init.tries);
   }
 }
 
