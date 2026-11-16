@@ -252,6 +252,27 @@ function render() {
   view.insertAdjacentHTML('beforeend', `<footer class="credit">억 ${APP_VERSION} · 앱 제작자 KEUN</footer>`);
 }
 
+// 맨 위 카드: 수입 하나를 막대 하나로 — 🔁 고정 · 🛒 생활 · 📈 투자(+적립) · 남음. 같은 숫자를 두 번 쓰지 않음
+function heroHtml(label, st) {
+  const inc = st.income || 0, sav = (st.saving || 0) + (st.reserve || 0);
+  const base = Math.max(inc, (st.expense || 0) + sav, 1);
+  const w = v => Math.max(0, v / base * 100).toFixed(1);
+  const P = v => inc > 0 ? `${Math.round(v / inc * 100)}%` : '';
+  return `<section class="hero">
+    <div class="hero-label">${label}</div>
+    <div class="hero-amount ${st.left < 0 ? 'neg' : ''}">${won(st.left)}</div>
+    <div class="hero-stack">
+      <i class="a-fix" style="width:${w(st.fixedExpense || 0)}%"></i><i class="a-liv" style="width:${w(st.varExpense || 0)}%"></i><i class="a-sav" style="width:${w(sav)}%"></i>
+      ${inc > 0 ? '<b class="half" title="억 원칙 50%"></b>' : ''}
+    </div>
+    <div class="hero-split">
+      <div><span>💵</span><b class="income">+${shortWon(inc)}</b></div>
+      <div><span>💸 ${P(st.expense || 0)}</span><b class="expense">−${shortWon(st.expense || 0)}</b><small><i class="dot a-fix"></i>🔁 ${shortWon(st.fixedExpense || 0)} <i class="dot a-liv"></i>🛒 ${shortWon(st.varExpense || 0)}</small></div>
+      <div><span>📈 ${P(sav)}</span><b>${shortWon(sav)}</b>${st.reserve ? `<small>🫙 ${shortWon(st.reserve)}</small>` : ''}</div>
+    </div>
+  </section>`;
+}
+
 function renderHome() {
   if (viewMode === 'year') return renderYearHome();
   const s = monthStats(viewMonth);
@@ -261,18 +282,8 @@ function renderHome() {
   const spentPct = s.income > 0 ? Math.min(100, pct(s.expense, s.income)) : 0;
 
   view.innerHTML = `
-    <section class="hero">
-      <div class="hero-label">${monthLabel(viewMonth)} 남은 돈</div>
-      <div class="hero-amount ${s.left < 0 ? 'neg' : ''}">${won(s.left)}</div>
-      <div class="hero-bar"><i style="width:${spentPct}%"></i></div>
-      <div class="hero-meta"><span>지출 ${s.income > 0 ? pct(s.expense, s.income) : 0}%</span><span>저축률 ${s.income > 0 ? rate + '%' : '–'}</span></div>
-      <div class="hero-split">
-        <div><span>수입</span><b>${won(s.income)}</b></div>
-        <div><span>지출</span><b>${won(s.expense)}</b></div>
-        ${s.saving ? `<div><span>투자</span><b>${won(s.saving)}</b></div>` : ''}
-        ${s.reserve ? `<div><span>적립</span><b>${won(s.reserve)}</b></div>` : ''}
-      </div>
-    </section>
+    ${heroHtml('💰', s)}
+
 
     ${guideHtml()}
     ${eokHtml()}
@@ -280,17 +291,14 @@ function renderHome() {
     ${reviewHtml()}
     ${budgetHtml()}
     ${uncategorized().length ? `<button class="sms-cta" data-classify><span class="cat-ic" style="--c:var(--gold)">❓</span><span><b>분류 필요 ${uncategorized().length}</b></span><span class="chev">›</span></button>` : ''}
-    <section class="card grid2 compact">
-      <div class="stat"><div class="label">고정지출</div><div class="value">${won(s.fixedExpense)}</div></div>
-      <div class="stat"><div class="label">변동지출</div><div class="value">${won(s.varExpense)}</div></div>
-    </section>
+
 
     <section class="card">
-      <h2>지출 구성</h2>
+      <h2>🛒</h2>
       ${cats.length ? `
         <div class="donut-wrap">
           ${donut(cats, s.varExpense)}
-          <div class="donut-center"><span>변동지출</span><b>${shortWon(s.varExpense)}원</b></div>
+          <div class="donut-center"><span style="font-size:28px">🛒</span></div>
         </div>
         <ul class="list cats">${cats.map(([c, v]) => `
           <li data-cat-detail="${esc(c)}" data-scope="month"><div class="li-main">${catIcon(c)}<div><div class="title">${esc(c)}</div><div class="sub">${v / s.varExpense < 0.01 ? '1% 미만' : pct(v, s.varExpense) + '%'}</div></div></div>
@@ -299,7 +307,7 @@ function renderHome() {
     </section>
 
     <section class="card">
-      <div class="row"><h2>최근 내역</h2>${s.txs.length ? `<button class="link-btn" data-goto="tx">전체 ›</button>` : ''}</div>
+      <div class="row"><h2>🧾</h2>${s.txs.length ? `<button class="link-btn" data-goto="tx" aria-label="전체">›</button>` : ''}</div>
       ${recent.length ? `<ul class="list">${recent.map(txItem).join('')}</ul>` : `<div class="empty">기록 없음</div>`}
     </section>
     ${state.goals.length ? renderGoalSummary() : ''}
@@ -352,19 +360,16 @@ function eokHtml() {
   const p = Math.min(100, pct(e.cur, e.target));
   const short = e.need > e.pace ? e.need - e.pace : 0;
   return `<section class="card eok-card" data-goto="goals">
-    <div class="row"><h2>🏁 억까지</h2><span class="muted">${e.cur >= e.target ? '달성 🎉' : `남은 ${shortWon(e.target - e.cur)}원`}</span></div>
-    <div class="row"><span class="big">${p}%</span><span class="muted">${shortWon(e.cur)}원 / ${shortWon(e.target)}원</span></div>
+    <div class="row"><h2>🏁 억</h2><span class="muted">${shortWon(e.cur)} / ${shortWon(e.target)}</span></div>
+    <div class="row"><span class="big">${p}%</span><span class="muted">${e.cur >= e.target ? '🎉' : `📅 ${etaLabel(e.now, e.months)}`}</span></div>
     <div class="eok-bar"><i style="width:${p}%"></i>${e.steps.slice(0, -1).map(v => `<b class="${e.cur >= v ? 'on' : ''}" style="left:${pct(v, e.target)}%"></b>`).join('')}</div>
     <div class="eok-steps">${e.steps.map(v => `<span class="${e.cur >= v ? 'on' : v === e.next ? 'next' : ''}">${e.cur >= v ? '✓ ' : ''}${shortWon(v)}</span>`).join('')}</div>
     <table class="mini">
-      ${e.cur < e.next ? `<tr><td>🎯 ${shortWon(e.next)}</td><td>−${shortWon(e.next - e.cur)}</td></tr>` : ''}
       ${(() => { const lk = (state.assets || []).filter(a => !a.biz && a.kind !== '부채' && isPension(a)).reduce((t, a) => t + (a.balance || 0), 0); return lk ? `<tr><td>🔒 연금</td><td class="muted">${shortWon(lk)}</td></tr>` : ''; })()}
-      <tr><td>💪 매달</td><td>${shortWon(e.pace)}</td></tr>
       <tr data-biz-goal><td>💼 사업</td><td><span class="${e.biz < 0 ? 'expense' : e.biz > 0 ? 'income' : ''}">${e.biz > 0 ? '+' : e.biz < 0 ? '−' : ''}${shortWon(Math.abs(e.biz))}</span>${e.bizGoal ? ` / ${shortWon(e.bizGoal)}` : ''} ›</td></tr>
       ${e.bizGoal ? `<tr><td colspan="2"><div class="bar"><i style="width:${Math.min(100, Math.max(0, pct(e.biz, e.bizGoal)))}%"></i></div></td></tr>` : ''}
-      <tr><td>📅 도달</td><td>${etaLabel(e.now, e.months)}</td></tr>
       ${e.deadline && e.cur < e.target ? `<tr><td>⏰ ${e.deadline.replace('-', '.')}</td><td>${shortWon(e.need)}${short ? ` <b class="expense">+${shortWon(short)}</b>` : ' ✓'}</td></tr>` : ''}
-      ${e.bizGoal && isFinite(e.monthsBiz) && e.cur < e.target ? `<tr><td>🚀 사업 목표 시</td><td class="income">${etaLabel(e.now, e.monthsBiz)}</td></tr>` : ''}
+      ${e.bizGoal && isFinite(e.monthsBiz) && e.cur < e.target ? `<tr><td>🚀 💼 목표</td><td class="income">${etaLabel(e.now, e.monthsBiz)}</td></tr>` : ''}
       ${e.faster >= 1 ? `<tr><td>⚡ +10만</td><td class="income">−${e.faster}개월</td></tr>` : ''}
     </table>
     ${eokStepLog()}
@@ -422,30 +427,20 @@ function allocHtml() {
   const rSav = Math.max(sav, Math.ceil(income * eokRule() / 10000) * 10000), rLiving = income - fixed - rSav; // 억 원칙
   const tSav = Math.max(rSav, e.need), tLiving = income - fixed - tSav; // 기한까지 (원칙보다 덜 모으진 않음)
   const pen = sum(activeFixed(ym(new Date())).filter(f => f.type === 'saving' && isPension(f)));
-  const w = v => Math.max(0, Math.min(100, v / income * 100));
-  const cell = v => `${v < 0 ? '−' : ''}${shortWon(Math.abs(v))}원 <span class="muted">${P(v)}</span>`;
   const ok = sav >= fixed + living;
+  // 맨 위 카드에 이미 있는 '지금' 숫자는 다시 쓰지 않고, 바꿔야 할 것만 '지금 → 목표'로
   const lines = [];
-  if (ok) lines.push(`✓ 저축 ${P(sav)} ≥ 지출 ${P(fixed + living)}`);
-  else if (rLiving >= 0) lines.push(`⚠ 생활비 ${shortWon(rLiving)}까지`);
-  else lines.push(`⛔ 고정비 −${shortWon(-rLiving)} 필요`);
   if (has) {
-    if (tLiving < 0) lines.push(`⛔ ${e.deadline.replace('-', '.')}: 월 ${shortWon(-tLiving)} 부족`);
-    else if (e.need > rSav) lines.push(`⏰ ${e.deadline.replace('-', '.')}: 월 ${shortWon(e.need)}`);
+    if (tLiving < 0) lines.push(`⛔ ⏰${e.deadline.replace('-', '.')} 📈 −${shortWon(-tLiving)}`);
+    else if (e.need > rSav) lines.push(`⏰ ${e.deadline.replace('-', '.')} 📈 ${shortWon(e.need)}`);
     else lines.push(`⏰ ${e.deadline.replace('-', '.')} ✓`);
   }
-  if (pen > sav * 0.2) lines.push(`🔒 연금 ${shortWon(pen)} 많음`);
+  if (pen > sav * 0.2) lines.push(`🔒 ${shortWon(pen)}`);
   return `<section class="card">
-    <div class="row"><h2>📊 수익 배분</h2><span class="muted">수익 ${shortWon(income)}원</span></div>
-    <div class="alloc-bar"><i class="a-fix" style="width:${w(fixed)}%"></i><i class="a-liv" style="width:${w(living)}%"></i><i class="a-sav" style="width:${w(sav)}%"></i><b class="half"></b></div>
-    <table class="mini alloc">
-      <tr><th></th><th>지금</th><th>억 원칙</th>${has && tSav > rSav ? '<th>기한 맞춤</th>' : ''}</tr>
-      <tr><td><b class="dot a-fix"></b>고정비</td><td>${cell(fixed)}</td><td>${cell(fixed)}</td>${has && tSav > rSav ? `<td>${cell(fixed)}</td>` : ''}</tr>
-      <tr><td><b class="dot a-liv"></b>생활비</td><td class="${living < 0 ? 'expense' : ''}">${cell(living)}</td><td class="${rLiving < 0 ? 'expense' : ''}">${cell(rLiving)}</td>${has && tSav > rSav ? `<td class="${tLiving < 0 ? 'expense' : ''}">${cell(tLiving)}</td>` : ''}</tr>
-      <tr><td><b class="dot a-sav"></b>저축·투자</td><td>${cell(sav)}</td><td>${cell(rSav)}</td>${has && tSav > rSav ? `<td>${cell(tSav)}</td>` : ''}</tr>
-    </table>
-    ${lines.map(l => `<div class="hint">${l}</div>`).join('')}
-    <details class="hint"><summary>?</summary>저축 ≥ 지출(수익 50%+). 비상금 → 적금 → 투자 → 연금 소액. 수익률 0%.</details>
+    <div class="row"><h2>⚖️ ${Math.round(eokRule() * 100)}%</h2><span class="${ok ? 'income' : 'expense'}">${ok ? '✓' : rLiving < 0 ? '⛔ 🔁' : '⚠'}</span></div>
+    ${ok ? '' : `<div class="alloc-row"><span>🛒 ≤</span><b class="${rLiving < 0 ? 'expense' : ''}">${rLiving < 0 ? '−' : ''}${shortWon(Math.abs(rLiving))}</b><span>📈 ≥</span><b class="income">${shortWon(rSav)}</b></div>`}
+    ${lines.length ? `<div class="hint">${lines.join(' · ')}</div>` : ''}
+    <details class="hint"><summary>?</summary>📈 ≥ 💸 (수익 50%+) · 🛟 → 적금 → 투자 → 🔒 소액 · 수익률 0%</details>
   </section>`;
 }
 
@@ -2034,14 +2029,14 @@ function budgetInfo(m = currentPeriodMonth()) {
 function budgetHtml() {
   if (viewMode !== 'month' || viewMonth !== ym(new Date())) return '';
   const b = budgetInfo();
-  if (!b.budget) return `<button class="sms-cta" data-budget><span class="cat-ic" style="--c:var(--gold)">💰</span><span><b>변동지출 예산 정하기</b><small>여유 한도 ${won(b.room)}</small></span><span class="chev">›</span></button>`;
+  if (!b.budget) return `<button class="sms-cta" data-budget><span class="cat-ic" style="--c:var(--gold)">💰</span><span><b>🛒 ＋</b><small>≤ ${shortWon(b.room)}</small></span><span class="chev">›</span></button>`;
   const p = Math.min(100, pct(b.spent, b.budget)), over = b.spent > b.budget, warn = !over && p >= 80;
   return `<section class="card" data-budget>
-    <div class="row"><h2>💰 예산 <span class="muted" style="font-weight:400;font-size:12px">${b.period.from.slice(5).replace('-', '/')}~${b.period.to.slice(5).replace('-', '/')}</span></h2><span class="muted">${won(b.spent)} / ${won(b.budget)}</span></div>
+    <div class="row"><h2>💰 🛒 <span class="muted" style="font-weight:400;font-size:12px">${b.period.from.slice(5).replace('-', '/')}~${b.period.to.slice(5).replace('-', '/')}</span></h2><span class="muted">${shortWon(b.spent)} / ${shortWon(b.budget)}</span></div>
     <div class="bar ${over || warn ? 'over' : ''}"><i style="width:${p}%"></i></div>
-    <div class="row" style="margin-top:8px"><span class="muted">${over ? `초과 ${won(-b.left)}` : `남음 ${won(b.left)}`}</span><b>${over ? '⛔' : `하루 ${won(b.perDay)}`}</b></div>
-    ${b.projected > b.budget && !over ? `<div class="hint">⚠ 이 속도면 월말 ${won(b.projected)}</div>` : ''}
-    ${b.budget > b.room ? `<div class="hint">⚠ 예산이 여유 한도(${won(b.room)})보다 ${won(b.budget - b.room)} 많음 → 그만큼 적자</div>` : ''}
+    <div class="row" style="margin-top:8px"><span class="${over ? 'expense' : 'muted'}">${over ? `⛔ +${shortWon(-b.left)}` : `${shortWon(b.left)} 남음`}</span><b>${over ? '' : `${shortWon(b.perDay)}/일`}</b></div>
+    ${b.projected > b.budget && !over ? `<div class="hint">⚠ 📅말 ${shortWon(b.projected)}</div>` : ''}
+    ${b.budget > b.room ? `<div class="hint">⚠ 한도 ${shortWon(b.room)} +${shortWon(b.budget - b.room)}</div>` : ''}
   </section>`;
 }
 function openBudgetSheet() {
@@ -2049,18 +2044,18 @@ function openBudgetSheet() {
   const past = [1, 2, 3].map(i => monthStats(shiftMonth(ym(new Date()), -i))).filter(s => s.varExpense > 0 && !s.actual);
   const avg = past.length ? Math.round(past.reduce((a, s) => a + s.varExpense, 0) / past.length) : 0;
   const r = n => Math.max(0, Math.round(n / 10000) * 10000);
-  openSheet(`<h2>💰 변동지출 예산</h2>
-    <div class="muted">고정지출·투자·적립을 뺀 여유 한도 <b>${won(b.room)}</b></div>
+  openSheet(`<h2>💰 🛒</h2>
+    <div class="muted">한도 <b>${won(b.room)}</b></div>
     <div class="grid2">
       <div><label>월 예산</label><input name="monthly" data-money inputmode="numeric" value="${moneyVal(b.budget)}" placeholder="0"></div>
-      <div><label>시작일 (월급일)</label><input name="startDay" type="number" min="1" max="28" value="${state.settings.budget?.startDay || 1}"></div>
+      <div><label>📅 시작일</label><input name="startDay" type="number" min="1" max="28" value="${state.settings.budget?.startDay || 1}"></div>
     </div>
     <div class="chips">
-      ${b.s.income > 0 ? `<button type="button" class="chip" data-set="${r(b.s.income * (1 - eokRule()) - b.s.fixedExpense)}" style="--c:var(--gold)">🏁 억 원칙 ${shortWon(r(b.s.income * (1 - eokRule()) - b.s.fixedExpense))}</button>` : ''}
-      <button type="button" class="chip" data-set="${r(b.room)}" style="--c:var(--income)">여유 한도 ${shortWon(r(b.room))}</button>
-      ${avg ? `<button type="button" class="chip" data-set="${r(avg * 0.8)}" style="--c:var(--gold)">평소의 80% ${shortWon(r(avg * 0.8))}</button>` : ''}
+      ${b.s.income > 0 ? `<button type="button" class="chip" data-set="${r(b.s.income * (1 - eokRule()) - b.s.fixedExpense)}" style="--c:var(--gold)">⚖️ ${shortWon(r(b.s.income * (1 - eokRule()) - b.s.fixedExpense))}</button>` : ''}
+      <button type="button" class="chip" data-set="${r(b.room)}" style="--c:var(--income)">한도 ${shortWon(r(b.room))}</button>
+      ${avg ? `<button type="button" class="chip" data-set="${r(avg * 0.8)}" style="--c:var(--gold)">평소×0.8 ${shortWon(r(avg * 0.8))}</button>` : ''}
     </div>
-    <div class="hint">여유 한도보다 크게 잡으면 그 차이만큼 매달 적자(저축을 깨거나 빚)</div>`,
+    `,
     fd => { state.settings.budget = { ...(state.settings.budget || {}), monthly: parseAmount(fd.monthly), startDay: Math.min(28, Math.max(1, Number(fd.startDay) || 1)) }; });
   form.querySelectorAll('[data-set]').forEach(c => c.onclick = () => { form.querySelector('[name=monthly]').value = moneyVal(Number(c.dataset.set)); });
 }
@@ -2070,12 +2065,12 @@ function reviewHtml() {
   if (viewMode !== 'month' || viewMonth !== ym(now) || now.getDate() > 7) return '';
   const pm = shiftMonth(ym(now), -1), b = budgetInfo(pm), pp = monthStats(shiftMonth(pm, -1));
   const top = Object.entries(b.s.byCat).sort((x, y) => y[1] - x[1]).slice(0, 3);
-  return `<section class="card"><h2>📅 ${Number(pm.slice(5))}월 리뷰</h2>
+  return `<section class="card"><h2>📅 ${Number(pm.slice(5))}월</h2>
     <table class="mini">
-      <tr><td>남은 돈</td><td class="${b.s.left < 0 ? 'expense' : 'income'}">${won(b.s.left)}</td></tr>
-      ${b.budget ? `<tr><td>변동지출 / 예산</td><td>${won(b.spent)} / ${won(b.budget)} ${b.spent > b.budget ? '⛔' : '✓'}</td></tr>` : ''}
-      <tr><td>지출 (전월 대비)</td><td>${won(b.s.expense)} ${pp.expense ? `${b.s.expense > pp.expense ? '▲' : '▼'}${shortWon(Math.abs(b.s.expense - pp.expense))}` : ''}</td></tr>
-      ${top.map(([c, v]) => `<tr><td>${esc(c)}</td><td>${won(v)}</td></tr>`).join('')}
+      <tr><td>💰</td><td class="${b.s.left < 0 ? 'expense' : 'income'}">${won(b.s.left)}</td></tr>
+      ${b.budget ? `<tr><td>🛒 / 💰</td><td>${won(b.spent)} / ${won(b.budget)} ${b.spent > b.budget ? '⛔' : '✓'}</td></tr>` : ''}
+      <tr><td>💸</td><td>${won(b.s.expense)} ${pp.expense ? `${b.s.expense > pp.expense ? '▲' : '▼'}${shortWon(Math.abs(b.s.expense - pp.expense))}` : ''}</td></tr>
+      ${top.map(([c, v]) => `<tr><td>${CAT_EMOJI[c] || ''} ${esc(c)}</td><td>${won(v)}</td></tr>`).join('')}
     </table></section>`;
 }
 
@@ -2109,17 +2104,8 @@ function renderYearHome() {
   const cats = Object.entries(ys.byCat).sort((a, b) => b[1] - a[1]);
   const max = Math.max(1, ...ys.months.map(m => Math.max(m.income, m.expense)));
   view.innerHTML = `
-    <section class="hero">
-      <div class="hero-label">${ys.y}년 · ${yearRange(ys)}</div>
-      <div class="hero-amount ${ys.left < 0 ? 'neg' : ''}">${won(ys.left)}</div>
-      <div class="hero-bar"><i style="width:${ys.income > 0 ? Math.min(100, pct(ys.expense, ys.income)) : 0}%"></i></div>
-      <div class="hero-meta"><span>지출 ${ys.income > 0 ? pct(ys.expense, ys.income) : 0}%</span><span>저축률 ${ys.income > 0 ? rate + '%' : '–'}</span></div>
-      <div class="hero-split">
-        <div><span>수입</span><b>${won(ys.income)}</b></div>
-        <div><span>지출</span><b>${won(ys.expense)}</b></div>
-        ${ys.saving ? `<div><span>투자</span><b>${won(ys.saving)}</b></div>` : ''}
-      </div>
-    </section>
+    ${heroHtml(`💰 ${yearRange(ys)}`, ys)}
+
     <section class="card">
       <div class="row"><h2>월별</h2><span class="legend"><i class="lg-in"></i>수입 <i class="lg-ex"></i>지출</span></div>
       <div class="ychart">${ys.months.map(m => `
@@ -2132,12 +2118,9 @@ function renderYearHome() {
         </button>`).join('')}
       </div>
     </section>
-    <section class="card grid2 compact">
-      <div class="stat"><div class="label">고정지출</div><div class="value">${won(ys.fixedExpense)}</div></div>
-      <div class="stat"><div class="label">변동지출</div><div class="value">${won(ys.varExpense)}</div></div>
-    </section>
+
     <section class="card">
-      <h2>지출 구성</h2>
+      <h2>🛒</h2>
       ${cats.length ? `
         <div class="donut-wrap">${donut(cats, ys.varExpense)}<div class="donut-center"><span>변동지출</span><b>${shortWon(ys.varExpense)}원</b></div></div>
         <ul class="list cats">${cats.map(([c, v]) => `
