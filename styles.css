@@ -458,3 +458,10 @@ details.hint summary { cursor: pointer; }
 .eok-months small { font-size: 10px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .eok-months span { font-size: 10px; color: var(--muted); }
 [data-biz-goal] { cursor: pointer; }
+/* 수익 배분 */
+.alloc-bar { display: flex; height: 12px; border-radius: 99px; overflow: hidden; background: var(--surface-2); margin: 4px 0 10px; }
+.alloc-bar i { display: block; height: 100%; }
+.a-fix { background: #9AA6B8; } .a-liv { background: var(--expense); } .a-sav { background: var(--gold); }
+.dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
+.alloc th { font-size: 11px; color: var(--muted); font-weight: 600; text-align: right; padding-bottom: 4px; }
+.alloc td { text-align: right; white-space: nowrap; } .alloc td:first-child { text-align: left; }

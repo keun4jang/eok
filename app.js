@@ -275,6 +275,7 @@ function renderHome() {
     </section>
 
     ${eokHtml()}
+    ${allocHtml()}
     ${reviewHtml()}
     ${budgetHtml()}
     ${uncategorized().length ? `<button class="sms-cta" data-classify><span class="cat-ic" style="--c:var(--gold)">❓</span><span><b>분류 필요 ${uncategorized().length}</b></span><span class="chev">›</span></button>` : ''}
@@ -403,6 +404,37 @@ function eokFasterHint(amount) {
   if (!(e.pace > 0) || !isFinite(e.months) || e.cur >= e.target || !(amount > 0)) return '';
   const d = e.months - monthsToReach(e.target, e.cur, e.pace + amount, 0);
   return d >= 1 ? `<div class="hint">🏁 이만큼 매달 모으면 억이 ${d}개월 빨라짐 · 절반만 줄여도 ${Math.max(0, e.months - monthsToReach(e.target, e.cur, e.pace + amount / 2, 0))}개월</div>` : '';
+}
+
+// 수익 배분: 수입을 고정비·생활비·저축으로 어떻게 나누고 있는지 + 목표 기한에 맞추려면 어떻게 나눠야 하는지 (수익률 0%)
+function allocHtml() {
+  if (viewMode !== 'month' || viewMonth !== ym(new Date())) return '';
+  const b = budgetInfo(), s = b.s, e = eokInfo();
+  const income = s.income; if (!(income > 0)) return '';
+  const fixed = s.fixedExpense, sav = s.saving + s.reserve, living = income - fixed - sav;
+  const P = v => `${Math.round(v / income * 100)}%`;
+  const has = !!e.deadline && e.cur < e.target;
+  const tLiving = income - fixed - e.need; // 기한에 맞추려면 생활비로 쓸 수 있는 돈
+  const w = v => Math.max(0, Math.min(100, v / income * 100));
+  const cell = v => `${shortWon(Math.abs(v))}원 <span class="muted">${P(v)}</span>`;
+  let verdict = '';
+  if (has) {
+    if (tLiving <= 0) verdict = `⛔ 수익만으론 월 ${shortWon(-tLiving)}원 부족 → 사업 순수익으로 채우거나 기한 늦추기`;
+    else if (living > tLiving) verdict = `⚠ 생활비를 월 ${shortWon(tLiving)}원(${P(tLiving)})까지 줄이고 ${shortWon(e.need)}원 저축해야 ${e.deadline.replace('-', '.')} 달성`;
+    else verdict = `✓ 지금 배분이면 ${e.deadline.replace('-', '.')} 달성 가능`;
+  }
+  return `<section class="card">
+    <div class="row"><h2>📊 수익 배분</h2><span class="muted">수익 ${shortWon(income)}원</span></div>
+    <div class="alloc-bar"><i class="a-fix" style="width:${w(fixed)}%"></i><i class="a-liv" style="width:${w(living)}%"></i><i class="a-sav" style="width:${w(sav)}%"></i></div>
+    <table class="mini alloc">
+      <tr><th></th><th>지금</th>${has ? '<th>기한 맞춤</th>' : ''}</tr>
+      <tr><td><b class="dot a-fix"></b>고정비</td><td>${cell(fixed)}</td>${has ? `<td>${cell(fixed)}</td>` : ''}</tr>
+      <tr><td><b class="dot a-liv"></b>생활비</td><td class="${living < 0 ? 'expense' : ''}">${living < 0 ? '−' : ''}${cell(living)}</td>${has ? `<td class="${tLiving < 0 ? 'expense' : ''}">${tLiving < 0 ? '−' : ''}${cell(tLiving)}</td>` : ''}</tr>
+      <tr><td><b class="dot a-sav"></b>저축·투자</td><td>${cell(sav)}</td>${has ? `<td>${cell(e.need)}</td>` : ''}</tr>
+    </table>
+    ${verdict ? `<div class="hint">${verdict}</div>` : ''}
+    <details class="hint"><summary>계산?</summary>고정비 = 고정지출·공과금·할부. 저축·투자 = 고정 탭 투자·적금 + 적립. 생활비 = 수익에서 둘을 뺀 나머지. 기한 맞춤 = 목표 기한까지 필요한 월 저축액(수익률 0%)을 먼저 떼고 남는 생활비.</details>
+  </section>`;
 }
 
 function renderGoalSummary() {
