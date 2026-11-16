@@ -274,6 +274,7 @@ function renderHome() {
       </div>
     </section>
 
+    ${guideHtml()}
     ${eokHtml()}
     ${allocHtml()}
     ${reviewHtml()}
@@ -409,7 +410,7 @@ function eokFasterHint(amount) {
 
 // 수익 배분: 수입을 고정비·생활비·저축으로 어떻게 나누고 있는지 + 목표 기한에 맞추려면 어떻게 나눠야 하는지 (수익률 0%)
 // 억 원칙(사용자 결정): 저축·투자 ≥ 지출(고정비+생활비) → 수익의 절반 이상 저축. 연금은 바로 못 쓰는 돈이라 소극적으로.
-const EOK_RULE = 0.5;
+const eokRule = () => (Number(state.settings.profile?.saveRate) || 50) / 100; // 내 상황의 저축 목표(기본 50% = 억 원칙)
 const isPension = x => /연금|IRP/i.test(x.name || '') || x.category === '연금';
 function allocHtml() {
   if (viewMode !== 'month' || viewMonth !== ym(new Date())) return '';
@@ -418,7 +419,7 @@ function allocHtml() {
   const fixed = s.fixedExpense, sav = s.saving + s.reserve, living = income - fixed - sav;
   const P = v => `${Math.round(v / income * 100)}%`;
   const has = !!e.deadline && e.cur < e.target;
-  const rSav = Math.max(sav, Math.ceil(income * EOK_RULE / 10000) * 10000), rLiving = income - fixed - rSav; // 억 원칙
+  const rSav = Math.max(sav, Math.ceil(income * eokRule() / 10000) * 10000), rLiving = income - fixed - rSav; // 억 원칙
   const tSav = Math.max(rSav, e.need), tLiving = income - fixed - tSav; // 기한까지 (원칙보다 덜 모으진 않음)
   const pen = sum(activeFixed(ym(new Date())).filter(f => f.type === 'saving' && isPension(f)));
   const w = v => Math.max(0, Math.min(100, v / income * 100));
@@ -446,6 +447,96 @@ function allocHtml() {
     ${lines.map(l => `<div class="hint">${l}</div>`).join('')}
     <details class="hint"><summary>억 원칙?</summary>저축·투자가 지출(고정비+생활비)보다 많게 = 수익의 50% 이상 저축. 순서: 비상금(생활비 3개월) → 적금·청약 → 바로 팔 수 있는 투자 → 연금은 세액공제용 소액만(중도 인출이 어려움). 수익률은 0%로 계산.</details>
   </section>`;
+}
+
+/* ===================== 길잡이 (사용자 상황별 추천) ===================== */
+// 규칙 엔진(guide.js)에 넣을 숫자를 모은다. 계획(고정 항목) 기준 + 생활비는 최근 실적 평균.
+function guideContext() {
+  const now = ym(new Date()), b = budgetInfo(), s = b.s, act = activeFixed(now);
+  const byCat = {};
+  act.filter(f => f.type === 'expense').forEach(f => { byCat[f.category] = (byCat[f.category] || 0) + f.amount; });
+  byCat['주거/관리비'] = (byCat['주거/관리비'] || 0) + billsTotal(now);
+  const sav = act.filter(f => f.type === 'saving');
+  // 생활비: 최근 3개월. 월 합계로 넣은 달(실제 기록)은 그 달 지출 − 지금 고정비로 추정. 사업·적립금 지출 제외
+  const months = [1, 2, 3].map(i => shiftMonth(now, -i)).map(m => {
+    const st = monthStats(m), biz = sum(st.txs.filter(t => t.type === 'expense' && (t.category === '사업' || t.fund)));
+    const v = st.actual ? st.expense - s.fixedExpense - biz : st.varExpense - biz;
+    return { v, byCat: st.byCat, ok: st.txCount > 0 && v > 0 };
+  }).filter(x => x.ok);
+  const variable = months.length ? months.reduce((a, x) => a + x.v, 0) / months.length : Math.max(b.spent, b.projected || 0);
+  const varByCat = {};
+  (months.length ? months : [{ byCat: s.byCat }]).forEach(x => Object.entries(x.byCat).forEach(([k, v]) => { varByCat[k] = (varByCat[k] || 0) + v / Math.max(1, months.length); }));
+  const assets = (state.assets || []).filter(a => !a.biz);
+  const cash = Math.max(Number(state.settings.emergency) || 0, assets.filter(a => a.kind === '현금').reduce((t, a) => t + (a.balance || 0), 0));
+  const inst = act.filter(f => f.type === 'expense' && isInst(f));
+  const e = eokInfo();
+  return {
+    income: s.income, fixed: { total: s.fixedExpense, byCat },
+    saving: sum(sav) + s.reserve, pension: sum(sav.filter(isPension)), etfItems: sav.filter(f => f.category === '주식·ETF').length, coinSaving: sum(sav.filter(f => f.category === '코인')),
+    variable: Math.round(variable), varByCat, cash, debtHigh: !!state.settings.highDebt || assets.some(a => a.kind === '부채' && /카드론|현금서비스|리볼빙/.test(a.name)),
+    installments: { sum: sum(inst), endSoon: sum(inst.filter(f => f.until <= shiftMonth(now, 1))) },
+    goal: e.g ? { target: e.target, cur: e.cur, need: e.need, pace: e.pace, deadline: e.deadline } : null,
+    biz: { net: bizNet(now), goal: Number(state.settings.bizGoal) || 0 },
+    recurring: recurringCandidates().length, uncategorized: uncategorized().length, hasAssets: assets.length > 0,
+  };
+}
+// '했어요'로 넘긴 항목은 30일 동안 숨김(그 뒤에도 조건이 그대로면 다시 나옴)
+function guideItems() {
+  const done = state.settings.guideDone || {}, today = todayStr();
+  const d30 = d => { const x = new Date(d); x.setDate(x.getDate() + 30); return `${ym(x)}-${String(x.getDate()).padStart(2, '0')}`; };
+  return Guide.build(guideContext(), state.settings.profile).filter(it => !done[it.id] || d30(done[it.id]) < today);
+}
+function eokGain(amount) { // 매달 amount를 더 모으면 억이 몇 개월 빨라지나(수익률 0%)
+  const e = eokInfo();
+  if (!(amount > 0) || !(e.pace > 0) || !isFinite(e.months) || e.cur >= e.target) return 0;
+  return e.months - monthsToReach(e.target, e.cur, e.pace + amount, 0);
+}
+function guideRow(it) {
+  const g = it.boost ? eokGain(it.impact) : 0;
+  return `<div class="guide-item p${Math.min(it.pri, 4)}">
+    <div class="row"><b>${it.icon} ${esc(it.title)}</b>${it.impact ? `<span class="${it.boost ? 'income' : 'muted'}">월 ${shortWon(it.impact)}</span>` : ''}</div>
+    <div class="sub">${esc(it.why)}</div>
+    <div class="how">→ ${esc(it.how)}${g >= 1 ? ` <span class="pill ok">🏁 ${g}개월 빨리</span>` : ''}</div>
+    <div class="row guide-btns">${it.action ? `<button type="button" class="link-btn" data-guide-act="${it.action}">바로 하기 ›</button>` : '<span></span>'}<button type="button" class="link-btn" data-guide-done="${it.id}">✓ 했어요</button></div>
+  </div>`;
+}
+function guideHtml(all = false) {
+  if (!all && (viewMode !== 'month' || viewMonth !== ym(new Date()))) return '';
+  const items = guideItems();
+  if (!items.length) return all ? `<section class="card"><h2>🧭 길잡이</h2><div class="empty">✓ 지금 할 일 없음</div></section>` : '';
+  const show = all ? items : items.slice(0, 3);
+  return `<section class="card guide-card">
+    <div class="row"><h2>🧭 길잡이</h2>${!all && items.length > 3 ? `<button class="link-btn" data-goto="insights">전체 ${items.length} ›</button>` : ''}</div>
+    ${show.map(guideRow).join('')}
+    ${all ? `<details class="hint"><summary>기준?</summary>내 상황(수입 형태·주거·부양·투자 성향·연금·저축 목표)과 기록으로 계산. 보험 5~10%, 주거비 30%, 통신 월 7만 같은 비율은 흔히 쓰는 일반 기준이라 '점검 신호'로만 보세요. 수익률 0% 가정.</details>` : ''}
+  </section>`;
+}
+const PROFILE_OPTS = {
+  job: [['salary', '💼 월급'], ['free', '🧑‍💻 프리랜서'], ['biz', '🏪 사업']],
+  home: [['parents', '🏡 부모님'], ['monthly', '🔑 월세'], ['jeonse', '🏠 전세'], ['own', '🏘️ 자가']],
+  dependents: [['0', '없음'], ['1', '있음']],
+  risk: [['safe', '🛡️ 안정'], ['mid', '⚖️ 중립'], ['bold', '🚀 적극']],
+  pension: [['low', '🔒 소극'], ['normal', '🌱 보통']],
+  saveRate: [['30', '30%'], ['40', '40%'], ['50', '50%']],
+};
+const PROFILE_LABEL = { job: '수입', home: '주거', dependents: '부양가족', risk: '투자 성향', pension: '연금', saveRate: '저축 목표' };
+function profileHtml() {
+  const p = state.settings.profile;
+  const v = (k, val) => (PROFILE_OPTS[k].find(o => o[0] === String(val)) || [])[1] || '–';
+  return `<section class="card" data-profile>
+    <div class="row"><h2>👤 내 상황</h2><span class="chev">›</span></div>
+    ${p ? `<div class="chips">${Object.keys(PROFILE_LABEL).map(k => `<span class="chip" style="--c:var(--gold)">${v(k, k === 'dependents' ? (p[k] ? '1' : '0') : p[k])}</span>`).join('')}</div>
+      <div class="hint">비상금 기준 생활비 ${Guide.emergencyMonths(p)}개월</div>` : '<div class="empty">설정하면 나에게 맞춘 추천</div>'}
+  </section>`;
+}
+function openProfileSheet() {
+  const p = Object.assign({}, Guide.DEFAULT_PROFILE, state.settings.profile || {});
+  const seg = (k) => `<label>${PROFILE_LABEL[k]}</label><div class="seg seg${PROFILE_OPTS[k].length}">${PROFILE_OPTS[k].map(([val, l]) => {
+    const cur = k === 'dependents' ? (p[k] ? '1' : '0') : String(p[k]);
+    return `<input type="radio" name="${k}" id="pf-${k}-${val}" value="${val}" ${cur === val ? 'checked' : ''}><label for="pf-${k}-${val}">${l}</label>`; }).join('')}</div>`;
+  openSheet(`<h2>👤 내 상황</h2>${Object.keys(PROFILE_OPTS).map(seg).join('')}
+    <div class="hint">기기·계정에 저장. 상황이 바뀌면 다시 고치면 추천도 바뀜</div>`,
+    fd => { state.settings.profile = { job: fd.job, home: fd.home, dependents: fd.dependents === '1', risk: fd.risk, pension: fd.pension, saveRate: Number(fd.saveRate) || 50 }; });
 }
 
 function renderGoalSummary() {
@@ -747,10 +838,12 @@ function renderInsights() {
   const efTarget = monthlyExp * 3;
   const efOk = monthlyExp > 0 && st.emergency >= efTarget;
   view.innerHTML = `
+    ${profileHtml()}
+    ${guideHtml(true)}
     ${coachHtml()}
     ${accountCardHtml()}
     <section class="card">
-      <h2>절약</h2>
+      <h2>참고</h2>
       ${tips.length ? tips.map(t => `<details class="tip ${t.level || ''}"><summary>${esc(t.title)}</summary><div>${t.body}</div></details>`).join('') : `<div class="empty">기록 쌓이는 중</div>`}
     </section>
 
@@ -815,6 +908,8 @@ function coachSnapshot() {
     financialAssets: assetTotals().fin,
     previousAdvice: state.settings.aiAdvice ? { date: new Date(state.settings.aiAdvice.at).toISOString().slice(0, 10), score: state.settings.aiAdvice.data.score, actions: (state.settings.aiAdvice.data.actions || []).map(a => a.title) } : null,
     highInterestDebt: !!state.settings.highDebt,
+    profile: state.settings.profile || '미설정',
+    appGuide: (() => { try { return Guide.build(guideContext(), state.settings.profile).map(i => ({ pri: i.pri, title: i.title, why: i.why, how: i.how, monthly: i.impact || null })); } catch { return []; } })(),
     months,
     notes: '투자는 지출이 아님(저축으로 간주). leftover = 수입 − 지출 − 투자. 카드로 그때그때 쓰는 변동지출은 기록이 쌓이는 중이라 최근 달은 과소 집계일 수 있음.',
   };
@@ -1957,7 +2052,7 @@ function openBudgetSheet() {
       <div><label>시작일 (월급일)</label><input name="startDay" type="number" min="1" max="28" value="${state.settings.budget?.startDay || 1}"></div>
     </div>
     <div class="chips">
-      ${b.s.income > 0 ? `<button type="button" class="chip" data-set="${r(b.s.income * (1 - EOK_RULE) - b.s.fixedExpense)}" style="--c:var(--gold)">🏁 억 원칙 ${shortWon(r(b.s.income * (1 - EOK_RULE) - b.s.fixedExpense))}</button>` : ''}
+      ${b.s.income > 0 ? `<button type="button" class="chip" data-set="${r(b.s.income * (1 - eokRule()) - b.s.fixedExpense)}" style="--c:var(--gold)">🏁 억 원칙 ${shortWon(r(b.s.income * (1 - eokRule()) - b.s.fixedExpense))}</button>` : ''}
       <button type="button" class="chip" data-set="${r(b.room)}" style="--c:var(--income)">여유 한도 ${shortWon(r(b.room))}</button>
       ${avg ? `<button type="button" class="chip" data-set="${r(avg * 0.8)}" style="--c:var(--gold)">평소의 80% ${shortWon(r(avg * 0.8))}</button>` : ''}
     </div>
@@ -2117,9 +2212,12 @@ $('#monthLabel').onclick = () => openPicker();
 $('#fab').onclick = () => openTxSheet();
 
 view.addEventListener('click', e => {
-  const el = e.target.closest('[data-biz-goal],[data-theme-set],[data-cat-detail],[data-src],[data-acct],[data-add-acct],[data-ilog],[data-ilog-clear],[data-fund],[data-add-fund],[data-recur],[data-inst-end],[data-budget],[data-classify],[data-del-cat],#addCatBtn,[data-asset],[data-add-asset],[data-month-sum],[data-bill-import],[data-bill-paid],[data-bill],[data-add-bill],[data-bill-migrate],[data-open-month],[data-import-fixed],[data-clear-ended],[data-sms],[data-day],[data-clear-day],[data-edit-tx],[data-edit-fixed],[data-add-fixed],[data-edit-goal],[data-add-goal],[data-goto],#exportBtn,#importBtn,#resetBtn,#updateBtn,#loginBtn,#logoutBtn,#syncBtn,#dropBtn,#coachBtn,[data-copy]');
+  const el = e.target.closest('[data-guide-done],[data-guide-act],[data-profile],[data-biz-goal],[data-theme-set],[data-cat-detail],[data-src],[data-acct],[data-add-acct],[data-ilog],[data-ilog-clear],[data-fund],[data-add-fund],[data-recur],[data-inst-end],[data-budget],[data-classify],[data-del-cat],#addCatBtn,[data-asset],[data-add-asset],[data-month-sum],[data-bill-import],[data-bill-paid],[data-bill],[data-add-bill],[data-bill-migrate],[data-open-month],[data-import-fixed],[data-clear-ended],[data-sms],[data-day],[data-clear-day],[data-edit-tx],[data-edit-fixed],[data-add-fixed],[data-edit-goal],[data-add-goal],[data-goto],#exportBtn,#importBtn,#resetBtn,#updateBtn,#loginBtn,#logoutBtn,#syncBtn,#dropBtn,#coachBtn,[data-copy]');
   if (!el) return;
-  if ('bizGoal' in el.dataset) openBizGoalSheet();
+  if (el.dataset.guideDone) { state.settings.guideDone = { ...(state.settings.guideDone || {}), [el.dataset.guideDone]: todayStr() }; save(); render(); toast('✓ 30일 뒤 다시 확인'); }
+  else if (el.dataset.guideAct) { const a = el.dataset.guideAct; if (a === 'profile') openProfileSheet(); else if (a === 'budget') openBudgetSheet(); else if (a === 'classify') openClassifySheet(); else { currentTab = a; render(); window.scrollTo(0, 0); } }
+  else if ('profile' in el.dataset) openProfileSheet();
+  else if ('bizGoal' in el.dataset) openBizGoalSheet();
   else if (el.dataset.themeSet) { setTheme(el.dataset.themeSet); render(); }
   else if (el.dataset.catDetail) openCatSheet(el.dataset.catDetail, el.dataset.scope);
   else if (el.dataset.src) { txSrc = txSrc === el.dataset.src ? '' : el.dataset.src; render(); }

@@ -467,3 +467,16 @@ details.hint summary { cursor: pointer; }
 .alloc td { text-align: right; white-space: nowrap; } .alloc td:first-child { text-align: left; }
 .alloc-bar { position: relative; }
 .alloc-bar .half { position: absolute; left: 50%; top: -3px; bottom: -3px; width: 2px; margin-left: -1px; background: var(--text); opacity: .5; border-radius: 2px; }
+
+/* 길잡이 */
+.guide-item { padding: 12px 0; border-bottom: 1px solid var(--line); }
+.guide-item:last-of-type { border-bottom: 0; }
+.guide-item b { font-size: 15px; }
+.guide-item .sub { color: var(--muted); font-size: 12px; margin-top: 2px; }
+.guide-item .how { font-size: 13px; margin-top: 4px; }
+.guide-item.p1 b { color: var(--expense); }
+.guide-btns { margin-top: 4px; }
+.guide-btns .link-btn { font-size: 12px; }
+.seg.seg4 { grid-template-columns: repeat(4, 1fr); }
+.seg.seg4 label, .seg.seg3 label { padding: 9px 2px; font-size: 13px; white-space: nowrap; }
+[data-profile] { cursor: pointer; }
