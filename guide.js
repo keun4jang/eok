@@ -87,7 +87,7 @@
     const rate = (ctx.saving || 0) / inc, want = (p.saveRate || 50) / 100;
     if (rate < want - 0.02 && !(left < -10000)) { // 적자면 위 항목(생활비 줄이기)이 먼저 — 서로 반대로 들리지 않게
       const gap = r1(inc * want - (ctx.saving || 0));
-      add({ id: 'saverate', pri: 2, icon: '🏁', title: `저축 ${Math.round(rate * 100)}% → ${p.saveRate}%`,
+      add({ id: 'saverate', pri: 2, icon: '📈', title: `저축 ${Math.round(rate * 100)}% → ${p.saveRate}%`,
         why: `평균 가구 ${SOURCES.S1.show}`, how: '월급날 자동이체 먼저', impact: gap, boost: true, action: 'budget', basis: 'stat', src: 'S1' });
     }
 

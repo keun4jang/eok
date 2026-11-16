@@ -499,3 +499,9 @@ details.hint summary { cursor: pointer; }
 .seg.seg4 { grid-template-columns: repeat(4, 1fr); }
 .seg.seg4 label, .seg.seg3 label { padding: 9px 2px; font-size: 13px; white-space: nowrap; }
 [data-profile] { cursor: pointer; }
+/* 맨 위 카드 세 칸: 폰 폭(375px)에서 칸이 내용 때문에 넓어지지 않게 */
+.hero-split { grid-auto-columns: minmax(0, 1fr); }
+.hero-split div { min-width: 0; }
+.hero-split span { word-break: keep-all; overflow-wrap: anywhere; }
+.hero-split b { font-size: 17px; white-space: nowrap; }
+@media (max-width: 380px) { .hero-split div + div { padding-left: 8px; } .hero-split b { font-size: 15px; } }
