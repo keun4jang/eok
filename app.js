@@ -495,7 +495,7 @@ function guideRow(it) {
   const g = it.boost ? eokGain(it.impact) : 0;
   return `<div class="guide-item p${Math.min(it.pri, 4)}">
     <div class="row"><b>${it.icon} ${esc(it.title)}</b>${it.impact ? `<span class="${it.boost ? 'income' : 'muted'}">월 ${shortWon(it.impact)}</span>` : ''}</div>
-    <div class="sub">${esc(it.why)}</div>
+    <div class="sub"><span class="basis ${it.basis}">${Guide.BASIS[it.basis] || ''}${it.src ? ' ' + it.src : ''}</span>${esc(it.why)}</div>
     <div class="how">→ ${esc(it.how)}${g >= 1 ? ` <span class="pill ok">🏁 ${g}개월 빨리</span>` : ''}</div>
     <div class="row guide-btns">${it.action ? `<button type="button" class="link-btn" data-guide-act="${it.action}">바로 하기 ›</button>` : '<span></span>'}<button type="button" class="link-btn" data-guide-done="${it.id}">✓ 했어요</button></div>
   </div>`;
@@ -508,7 +508,10 @@ function guideHtml(all = false) {
   return `<section class="card guide-card">
     <div class="row"><h2>🧭 길잡이</h2>${!all && items.length > 3 ? `<button class="link-btn" data-goto="insights">전체 ${items.length} ›</button>` : ''}</div>
     ${show.map(guideRow).join('')}
-    ${all ? `<details class="hint"><summary>기준?</summary>내 상황(수입 형태·주거·부양·투자 성향·연금·저축 목표)과 기록으로 계산. 보험 5~10%, 주거비 30%, 통신 월 7만 같은 비율은 흔히 쓰는 일반 기준이라 '점검 신호'로만 보세요. 수익률 0% 가정.</details>` : ''}
+    ${all ? `<details class="hint"><summary>근거?</summary>
+      <span class="basis stat">통계</span>공식 통계 원문에서 확인한 값 · <span class="basis">일반 기준</span>흔히 쓰는 기준(보험 5~10%, 주거비 30%, 통신 월 7만, 비상금 3~6개월) — 정답 아닌 점검 신호 · <span class="basis">내 기록</span>입력한 기록으로 계산 · <span class="basis">내 설정</span>👤 내 상황·억 원칙. 수익률 0% 가정.
+      <ol class="src-list">${Object.entries(Guide.SOURCES).map(([k, s]) => `<li><b>${k}</b> ${esc(s.label)} ${esc(s.show)} — ${esc(s.org)}, 발표 ${s.date}, 확인 ${s.checked}. ${esc(s.note)}<br><a href="${s.url}" target="_blank" rel="noopener">${esc(s.url)}</a></li>`).join('')}</ol>
+    </details>` : ''}
   </section>`;
 }
 const PROFILE_OPTS = {
@@ -909,7 +912,7 @@ function coachSnapshot() {
     previousAdvice: state.settings.aiAdvice ? { date: new Date(state.settings.aiAdvice.at).toISOString().slice(0, 10), score: state.settings.aiAdvice.data.score, actions: (state.settings.aiAdvice.data.actions || []).map(a => a.title) } : null,
     highInterestDebt: !!state.settings.highDebt,
     profile: state.settings.profile || '미설정',
-    appGuide: (() => { try { return Guide.build(guideContext(), state.settings.profile).map(i => ({ pri: i.pri, title: i.title, why: i.why, how: i.how, monthly: i.impact || null })); } catch { return []; } })(),
+    appGuide: (() => { try { return Guide.build(guideContext(), state.settings.profile).map(i => ({ pri: i.pri, title: i.title, why: i.why, how: i.how, monthly: i.impact || null, basis: Guide.BASIS[i.basis] || null })); } catch { return []; } })(),
     months,
     notes: '투자는 지출이 아님(저축으로 간주). leftover = 수입 − 지출 − 투자. 카드로 그때그때 쓰는 변동지출은 기록이 쌓이는 중이라 최근 달은 과소 집계일 수 있음.',
   };

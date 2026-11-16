@@ -22,7 +22,17 @@
     telecom: 70000,    // 통신 월 7만 넘으면 요금제 점검
     subscription: 0.03,
   };
-  const DISCRETIONARY = ['쇼핑', '식비', '배달', '카페/간식', '술·유흥', '문화/여가', '여행', '미용', '생활용품'];
+  // 근거 표시(기획 조사 스킬의 '숫자마다 출처' 원칙): 항목마다 basis 하나.
+  // stat = 공식 통계(SOURCES), rule = 흔히 쓰는 일반 기준(정답 아님), mine = 내 기록으로 계산, plan = 내 설정·억 원칙
+  const BASIS = { stat: '통계', rule: '일반 기준', mine: '내 기록', plan: '내 설정' };
+  // 공식 통계 원장. 원문 페이지에서 직접 확인한 값만 넣는다. 새 발표가 나오면 값·날짜를 함께 바꿀 것.
+  const SOURCES = {
+    S1: { label: '평균 가구 흑자율(처분가능소득 중 남은 돈)', value: 0.308, show: '30.8%',
+      org: '국가데이터처 가계동향조사 2026년 2/4분기(전국 1인 이상 가구)', date: '2026-08-27', checked: '2026-11-16',
+      url: 'https://eiec.kdi.re.kr/policy/materialView.do?num=285882',
+      note: '세금·사회보험 뺀 소득 기준이라 실수령 수익과 대략 비교 가능. 평균 가구원 2명 이상이라 1인 기준과 다름' },
+  };
+  const DISCRETIONARY =['쇼핑', '식비', '배달', '카페/간식', '술·유흥', '문화/여가', '여행', '미용', '생활용품'];
 
   const man = n => {
     const a = Math.abs(Math.round(n));
@@ -77,8 +87,10 @@
     const rate = (ctx.saving || 0) / inc, want = (p.saveRate || 50) / 100;
     if (rate < want - 0.02 && !(left < -10000)) { // 적자면 위 항목(생활비 줄이기)이 먼저 — 서로 반대로 들리지 않게
       const gap = r1(inc * want - (ctx.saving || 0));
+      const avg = SOURCES.S1;
       add({ id: 'saverate', pri: 2, icon: '🏁', title: `저축 ${Math.round(rate * 100)}% → ${p.saveRate}%`,
-        why: `목표 비율까지 월 ${man(gap)}원 모자람`, how: '월급날 저축을 먼저 자동이체 → 남은 돈으로 생활(선저축)', impact: gap, boost: true, action: 'budget' });
+        why: `목표 비율까지 월 ${man(gap)}원 모자람 · 평균 가구는 ${avg.show}${rate < avg.value ? ' (평균보다 낮음)' : ''}`,
+        how: '월급날 저축을 먼저 자동이체 → 남은 돈으로 생활(선저축)', impact: gap, boost: true, action: 'budget', basis: 'stat', src: 'S1' });
     }
 
     // 4) 고정비 점검 (일반 기준 대비)
@@ -137,11 +149,18 @@
 
     return finish(out);
   }
+  // 항목별 근거 종류(위에서 basis를 직접 준 항목은 그대로)
+  const ID_BASIS = {
+    profile: 'plan', income: 'mine', deficit: 'mine', debt: 'rule', assets: 'mine', emergency: 'rule', idle: 'rule',
+    insurance: 'rule', telecom: 'rule', housing: 'rule', subs: 'mine', cat: 'mine', installment: 'mine',
+    deadline: 'mine', biz: 'plan', pension: 'plan', 'pension-start': 'rule', etf: 'rule', coin: 'plan', recurring: 'mine', classify: 'mine',
+  };
   function finish(out) {
+    out.forEach(it => { if (!it.basis) it.basis = ID_BASIS[it.id.split(':')[0]] || 'mine'; });
     return out.sort((a, b) => a.pri - b.pri || (b.impact || 0) - (a.impact || 0));
   }
 
-  const api = { build, emergencyMonths, DEFAULT_PROFILE, BENCH };
+  const api = { build, emergencyMonths, DEFAULT_PROFILE, BENCH, BASIS, SOURCES };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Guide = api;
 })(typeof window !== 'undefined' ? window : globalThis);
