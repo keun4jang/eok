@@ -465,3 +465,5 @@ details.hint summary { cursor: pointer; }
 .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
 .alloc th { font-size: 11px; color: var(--muted); font-weight: 600; text-align: right; padding-bottom: 4px; }
 .alloc td { text-align: right; white-space: nowrap; } .alloc td:first-child { text-align: left; }
+.alloc-bar { position: relative; }
+.alloc-bar .half { position: absolute; left: 50%; top: -3px; bottom: -3px; width: 2px; margin-left: -1px; background: var(--text); opacity: .5; border-radius: 2px; }

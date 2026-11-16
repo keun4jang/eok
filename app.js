@@ -357,6 +357,7 @@ function eokHtml() {
     <div class="eok-steps">${e.steps.map(v => `<span class="${e.cur >= v ? 'on' : v === e.next ? 'next' : ''}">${e.cur >= v ? '✓ ' : ''}${shortWon(v)}</span>`).join('')}</div>
     <table class="mini">
       ${e.cur < e.next ? `<tr><td>🎯 다음 ${shortWon(e.next)}원</td><td>${shortWon(e.next - e.cur)}원 남음</td></tr>` : ''}
+      ${(() => { const lk = (state.assets || []).filter(a => !a.biz && a.kind !== '부채' && isPension(a)).reduce((t, a) => t + (a.balance || 0), 0); return lk ? `<tr><td>🔒 그중 연금 (바로 못 씀)</td><td class="muted">${shortWon(lk)}원</td></tr>` : ''; })()}
       <tr><td>💪 매달 모으는 돈</td><td>${won(e.pace)}</td></tr>
       <tr data-biz-goal><td>💼 이번 달 사업 순수익</td><td><span class="${e.biz < 0 ? 'expense' : e.biz > 0 ? 'income' : ''}">${e.biz > 0 ? '+' : e.biz < 0 ? '−' : ''}${shortWon(Math.abs(e.biz))}원</span>${e.bizGoal ? ` / ${shortWon(e.bizGoal)}원` : ' · 목표 정하기'} ›</td></tr>
       ${e.bizGoal ? `<tr><td colspan="2"><div class="bar"><i style="width:${Math.min(100, Math.max(0, pct(e.biz, e.bizGoal)))}%"></i></div></td></tr>` : ''}
@@ -407,6 +408,9 @@ function eokFasterHint(amount) {
 }
 
 // 수익 배분: 수입을 고정비·생활비·저축으로 어떻게 나누고 있는지 + 목표 기한에 맞추려면 어떻게 나눠야 하는지 (수익률 0%)
+// 억 원칙(사용자 결정): 저축·투자 ≥ 지출(고정비+생활비) → 수익의 절반 이상 저축. 연금은 바로 못 쓰는 돈이라 소극적으로.
+const EOK_RULE = 0.5;
+const isPension = x => /연금|IRP/i.test(x.name || '') || x.category === '연금';
 function allocHtml() {
   if (viewMode !== 'month' || viewMonth !== ym(new Date())) return '';
   const b = budgetInfo(), s = b.s, e = eokInfo();
@@ -414,26 +418,33 @@ function allocHtml() {
   const fixed = s.fixedExpense, sav = s.saving + s.reserve, living = income - fixed - sav;
   const P = v => `${Math.round(v / income * 100)}%`;
   const has = !!e.deadline && e.cur < e.target;
-  const tLiving = income - fixed - e.need; // 기한에 맞추려면 생활비로 쓸 수 있는 돈
+  const rSav = Math.max(sav, Math.ceil(income * EOK_RULE / 10000) * 10000), rLiving = income - fixed - rSav; // 억 원칙
+  const tSav = Math.max(rSav, e.need), tLiving = income - fixed - tSav; // 기한까지 (원칙보다 덜 모으진 않음)
+  const pen = sum(activeFixed(ym(new Date())).filter(f => f.type === 'saving' && isPension(f)));
   const w = v => Math.max(0, Math.min(100, v / income * 100));
-  const cell = v => `${shortWon(Math.abs(v))}원 <span class="muted">${P(v)}</span>`;
-  let verdict = '';
+  const cell = v => `${v < 0 ? '−' : ''}${shortWon(Math.abs(v))}원 <span class="muted">${P(v)}</span>`;
+  const ok = sav >= fixed + living;
+  const lines = [];
+  if (ok) lines.push(`✓ 억 원칙 지킴: 저축 ${P(sav)} ≥ 지출 ${P(fixed + living)}`);
+  else if (rLiving >= 0) lines.push(`⚠ 억 원칙: 저축을 ${shortWon(rSav)}원(${P(rSav)})으로, 생활비는 ${shortWon(rLiving)}원까지`);
+  else lines.push(`⛔ 고정비만 ${P(fixed)} → 억 원칙을 지키려면 고정비부터 월 ${shortWon(-rLiving)}원 줄이거나 수익(사업)을 늘려야 함`);
   if (has) {
-    if (tLiving <= 0) verdict = `⛔ 수익만으론 월 ${shortWon(-tLiving)}원 부족 → 사업 순수익으로 채우거나 기한 늦추기`;
-    else if (living > tLiving) verdict = `⚠ 생활비를 월 ${shortWon(tLiving)}원(${P(tLiving)})까지 줄이고 ${shortWon(e.need)}원 저축해야 ${e.deadline.replace('-', '.')} 달성`;
-    else verdict = `✓ 지금 배분이면 ${e.deadline.replace('-', '.')} 달성 가능`;
+    if (tLiving < 0) lines.push(`⛔ ${e.deadline.replace('-', '.')}까지는 수익만으론 월 ${shortWon(-tLiving)}원 부족 → 사업 순수익 또는 기한 조정`);
+    else if (e.need > rSav) lines.push(`⏰ ${e.deadline.replace('-', '.')}까지 하려면 원칙보다 더: 월 ${shortWon(e.need)}원 저축`);
+    else lines.push(`⏰ 억 원칙만 지켜도 ${e.deadline.replace('-', '.')} 안에 달성`);
   }
+  if (pen > sav * 0.2) lines.push(`🔒 연금 ${shortWon(pen)}원은 바로 못 쓰는 돈 → 비상금·적금을 먼저 채우고 연금은 소액만`);
   return `<section class="card">
     <div class="row"><h2>📊 수익 배분</h2><span class="muted">수익 ${shortWon(income)}원</span></div>
-    <div class="alloc-bar"><i class="a-fix" style="width:${w(fixed)}%"></i><i class="a-liv" style="width:${w(living)}%"></i><i class="a-sav" style="width:${w(sav)}%"></i></div>
+    <div class="alloc-bar"><i class="a-fix" style="width:${w(fixed)}%"></i><i class="a-liv" style="width:${w(living)}%"></i><i class="a-sav" style="width:${w(sav)}%"></i><b class="half"></b></div>
     <table class="mini alloc">
-      <tr><th></th><th>지금</th>${has ? '<th>기한 맞춤</th>' : ''}</tr>
-      <tr><td><b class="dot a-fix"></b>고정비</td><td>${cell(fixed)}</td>${has ? `<td>${cell(fixed)}</td>` : ''}</tr>
-      <tr><td><b class="dot a-liv"></b>생활비</td><td class="${living < 0 ? 'expense' : ''}">${living < 0 ? '−' : ''}${cell(living)}</td>${has ? `<td class="${tLiving < 0 ? 'expense' : ''}">${tLiving < 0 ? '−' : ''}${cell(tLiving)}</td>` : ''}</tr>
-      <tr><td><b class="dot a-sav"></b>저축·투자</td><td>${cell(sav)}</td>${has ? `<td>${cell(e.need)}</td>` : ''}</tr>
+      <tr><th></th><th>지금</th><th>억 원칙</th>${has && tSav > rSav ? '<th>기한 맞춤</th>' : ''}</tr>
+      <tr><td><b class="dot a-fix"></b>고정비</td><td>${cell(fixed)}</td><td>${cell(fixed)}</td>${has && tSav > rSav ? `<td>${cell(fixed)}</td>` : ''}</tr>
+      <tr><td><b class="dot a-liv"></b>생활비</td><td class="${living < 0 ? 'expense' : ''}">${cell(living)}</td><td class="${rLiving < 0 ? 'expense' : ''}">${cell(rLiving)}</td>${has && tSav > rSav ? `<td class="${tLiving < 0 ? 'expense' : ''}">${cell(tLiving)}</td>` : ''}</tr>
+      <tr><td><b class="dot a-sav"></b>저축·투자</td><td>${cell(sav)}</td><td>${cell(rSav)}</td>${has && tSav > rSav ? `<td>${cell(tSav)}</td>` : ''}</tr>
     </table>
-    ${verdict ? `<div class="hint">${verdict}</div>` : ''}
-    <details class="hint"><summary>계산?</summary>고정비 = 고정지출·공과금·할부. 저축·투자 = 고정 탭 투자·적금 + 적립. 생활비 = 수익에서 둘을 뺀 나머지. 기한 맞춤 = 목표 기한까지 필요한 월 저축액(수익률 0%)을 먼저 떼고 남는 생활비.</details>
+    ${lines.map(l => `<div class="hint">${l}</div>`).join('')}
+    <details class="hint"><summary>억 원칙?</summary>저축·투자가 지출(고정비+생활비)보다 많게 = 수익의 50% 이상 저축. 순서: 비상금(생활비 3개월) → 적금·청약 → 바로 팔 수 있는 투자 → 연금은 세액공제용 소액만(중도 인출이 어려움). 수익률은 0%로 계산.</details>
   </section>`;
 }
 
@@ -748,8 +759,9 @@ function renderInsights() {
       <ol class="ladder">
         <li class="${st.highDebt ? '' : 'done'}">고금리 빚 상환 ${st.highDebt ? '<span class="pill bad">해당</span>' : '<span class="pill ok">없음</span>'}</li>
         <li class="${efOk ? 'done' : ''}">비상금 ${shortWon(efTarget)}원 ${efOk ? '<span class="pill ok">충족</span>' : '<span class="pill bad">부족</span>'}</li>
-        <li>연금저축 · IRP · ISA</li>
-        <li>분산 ETF 적립</li>
+        <li>적금·청약 (바로 쓸 수 있는 돈)</li>
+        <li>분산 ETF 적립 · ISA</li>
+        <li>연금저축·IRP는 세액공제용 소액만 🔒</li>
         <li>개별주·코인은 소액만</li>
       </ol>
     </section>
@@ -1945,6 +1957,7 @@ function openBudgetSheet() {
       <div><label>시작일 (월급일)</label><input name="startDay" type="number" min="1" max="28" value="${state.settings.budget?.startDay || 1}"></div>
     </div>
     <div class="chips">
+      ${b.s.income > 0 ? `<button type="button" class="chip" data-set="${r(b.s.income * (1 - EOK_RULE) - b.s.fixedExpense)}" style="--c:var(--gold)">🏁 억 원칙 ${shortWon(r(b.s.income * (1 - EOK_RULE) - b.s.fixedExpense))}</button>` : ''}
       <button type="button" class="chip" data-set="${r(b.room)}" style="--c:var(--income)">여유 한도 ${shortWon(r(b.room))}</button>
       ${avg ? `<button type="button" class="chip" data-set="${r(avg * 0.8)}" style="--c:var(--gold)">평소의 80% ${shortWon(r(avg * 0.8))}</button>` : ''}
     </div>
