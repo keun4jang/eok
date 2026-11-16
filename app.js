@@ -43,7 +43,7 @@ function setTheme(t) {
   try { localStorage.setItem('eok.theme', t); } catch {}
   document.documentElement.setAttribute('data-theme', t);
   const dark = t === 'dark' || (t === 'auto' && matchMedia('(prefers-color-scheme: dark)').matches);
-  document.getElementById('themeColor')?.setAttribute('content', dark ? '#0C0D10' : '#F6F3EE');
+  document.getElementById('themeColor')?.setAttribute('content', dark ? '#0C1220' : '#EDF0F4');
 }
 
 const defaultState = () => ({
@@ -258,11 +258,12 @@ function heroHtml(label, st) {
   const base = Math.max(inc, (st.expense || 0) + sav, 1);
   const w = v => Math.max(0, v / base * 100).toFixed(1);
   const P = v => inc > 0 ? `${Math.round(v / inc * 100)}%` : '';
+  const seg = (name, v) => v / base >= 0.2 ? `${name} ${P(v)}` : v / base >= 0.1 ? P(v) : ''; // 칸이 좁으면 이름 생략
   return `<section class="hero">
     <div class="hero-label">${label}</div>
     <div class="hero-amount ${st.left < 0 ? 'neg' : ''}">${won(st.left)}</div>
     <div class="hero-stack">
-      <i class="a-fix" style="width:${w(st.fixedExpense || 0)}%"></i><i class="a-liv" style="width:${w(st.varExpense || 0)}%"></i><i class="a-sav" style="width:${w(sav)}%"></i>
+      <i class="a-fix" style="width:${w(st.fixedExpense || 0)}%">${seg('고정', st.fixedExpense || 0)}</i><i class="a-liv" style="width:${w(st.varExpense || 0)}%">${seg('생활', st.varExpense || 0)}</i><i class="a-sav" style="width:${w(sav)}%">${seg('저축', sav)}</i>
       ${inc > 0 ? '<b class="half" title="억 원칙 50%"></b>' : ''}
     </div>
     <div class="hero-split">
