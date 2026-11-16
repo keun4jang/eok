@@ -310,7 +310,7 @@ function renderHome() {
       <div class="row"><h2>🧾 최근 내역</h2>${s.txs.length ? `<button class="link-btn" data-goto="tx">전체 ›</button>` : ''}</div>
       ${recent.length ? `<ul class="list">${recent.map(txItem).join('')}</ul>` : `<div class="empty">기록 없음</div>`}
     </section>
-    ${state.goals.length ? renderGoalSummary() : ''}
+    ${state.goals.some(g => g !== eokInfo().g) ? renderGoalSummary() : ''}
   `;
 }
 
@@ -352,7 +352,7 @@ function eokInfo() {
   const monthsBiz = bizGoal > 0 ? monthsToReach(target, cur, pace + bizGoal, 0) : Infinity;
   return { g, target, cur, now, pace, biz, bizGoal, monthsBiz, months, need, steps, next, faster, deadline: g?.deadline || '' };
 }
-const etaLabel = (now, months) => !isFinite(months) || months > 600 ? '–' : months <= 0 ? '달성 🎉' : monthLabel(shiftMonth(now, months));
+const etaLabel = (now, months) => !isFinite(months) || months > 600 ? '–' : months <= 0 ? '달성 🎉' : shiftMonth(now, months).replace('-', '.');
 function eokHtml() {
   if (viewMode !== 'month' || viewMonth !== ym(new Date())) return '';
   const e = eokInfo();
@@ -370,7 +370,7 @@ function eokHtml() {
       ${e.bizGoal ? `<tr><td colspan="2"><div class="bar"><i style="width:${Math.min(100, Math.max(0, pct(e.biz, e.bizGoal)))}%"></i></div></td></tr>` : ''}
       ${e.deadline && e.cur < e.target ? `<tr><td>⏰ 기한 ${e.deadline.replace('-', '.')}</td><td>월 ${shortWon(e.need)}${short ? ` <b class="expense">+${shortWon(short)}</b>` : ' ✓'}</td></tr>` : ''}
       ${e.bizGoal && isFinite(e.monthsBiz) && e.cur < e.target ? `<tr><td>🚀 사업 목표 달성 시</td><td class="income">${etaLabel(e.now, e.monthsBiz)}</td></tr>` : ''}
-      ${e.faster >= 1 ? `<tr><td>⚡ 월 +10만 더 모으면</td><td class="income">−${e.faster}개월</td></tr>` : ''}
+      ${e.faster >= 1 ? `<tr><td>⚡ 월 10만 더 모으면</td><td class="income">${e.faster}개월 빨리</td></tr>` : ''}
     </table>
     ${eokStepLog()}
     ${eokBars()}
@@ -397,7 +397,7 @@ function eokBars() {
   const ms = [5, 4, 3, 2, 1, 0].map(i => { const m = shiftMonth(now, -i); return { m, v: m < start ? 0 : monthStats(m).saving }; }); // 기록 시작 전 달은 0(고정 항목이 가짜로 잡히지 않게)
   const max = Math.max(...ms.map(x => x.v));
   if (!(max > 0)) return '';
-  return `<div class="eok-months">${ms.map(x => `<div class="${x.m === now ? 'cur' : ''}"><small>${x.v ? shortWon(x.v) : ''}</small><i style="height:${Math.max(2, Math.round(x.v / max * 100))}%"></i><span>${Number(x.m.slice(5))}월</span></div>`).join('')}</div>`;
+  return `<div class="hint" style="margin-top:10px">📈 월별 저축·투자</div><div class="eok-months">${ms.map(x => `<div class="${x.m === now ? 'cur' : ''}"><small>${x.v ? shortWon(x.v) : ''}</small><i style="height:${Math.max(2, Math.round(x.v / max * 100))}%"></i><span>${Number(x.m.slice(5))}월</span></div>`).join('')}</div>`;
 }
 function openBizGoalSheet() {
   openSheet(`<h2>💼 사업 순수익 목표</h2>
@@ -423,19 +423,13 @@ function allocHtml() {
   const income = s.income; if (!(income > 0)) return '';
   const fixed = s.fixedExpense, sav = s.saving + s.reserve, living = income - fixed - sav;
   const P = v => `${Math.round(v / income * 100)}%`;
-  const has = !!e.deadline && e.cur < e.target;
   const rSav = Math.max(sav, Math.ceil(income * eokRule() / 10000) * 10000), rLiving = income - fixed - rSav; // 억 원칙
-  const tSav = Math.max(rSav, e.need), tLiving = income - fixed - tSav; // 기한까지 (원칙보다 덜 모으진 않음)
   const pen = sum(activeFixed(ym(new Date())).filter(f => f.type === 'saving' && isPension(f)));
   const ok = sav >= fixed + living;
   // 맨 위 카드에 이미 있는 '지금' 숫자는 다시 쓰지 않고, 바꿔야 할 것만 '지금 → 목표'로
   const lines = [];
-  if (has) {
-    if (tLiving < 0) lines.push(`⛔ ⏰ 기한 ${e.deadline.replace('-', '.')} 불가 −${shortWon(-tLiving)}`);
-    else if (e.need > rSav) lines.push(`⏰ 기한 ${e.deadline.replace('-', '.')} → 저축 ${shortWon(e.need)}`);
-    else lines.push(`⏰ 기한 ${e.deadline.replace('-', '.')} ✓`);
-  }
-  if (pen > sav * 0.2) lines.push(`🔒 연금 ${shortWon(pen)}`);
+  // ⏰ 기한 판정은 🏁 카드에만(두 카드가 다른 기준으로 ✓/부족을 말하지 않게)
+  if (pen > sav * 0.2) lines.push(`🔒 연금 월 ${shortWon(pen)}`);
   return `<section class="card">
     <div class="row"><h2>⚖️ 저축 ${Math.round(eokRule() * 100)}% 원칙</h2><span class="${ok ? 'income' : 'expense'}">${ok ? '✓ 지킴' : rLiving < 0 ? '⛔ 고정비 과다' : '⚠ 미달'}</span></div>
     ${ok ? '' : `<div class="alloc-row"><span>🛒 생활비 ≤</span><b class="${rLiving < 0 ? 'expense' : ''}">${rLiving < 0 ? '−' : ''}${shortWon(Math.abs(rLiving))}</b><span>📈 저축 ≥</span><b class="income">${shortWon(rSav)}</b></div>`}
@@ -489,16 +483,16 @@ function eokGain(amount) { // 매달 amount를 더 모으면 억이 몇 개월 �
 function guideRow(it) {
   const g = it.boost ? eokGain(it.impact) : 0;
   // 접힌 상태는 한 줄(아이콘·제목·금액). 눌러야 숫자·할 일·근거가 보임
-  const amt = it.impact ? (it.id === 'deficit' ? `−${shortWon(it.impact)}` : `${it.boost ? '+' : ''}${shortWon(it.impact)}`) : '';
+  const amt = it.impact ? (it.id === 'deficit' ? `월 −${shortWon(it.impact)}` : `월 ${it.boost ? '+' : ''}${shortWon(it.impact)}`) : '';
   return `<details class="guide-item p${Math.min(it.pri, 4)}">
-    <summary><b>${it.icon} ${esc(it.title)}</b><span class="gi-r">${g >= 1 ? `<span class="pill ok">🏁−${g}개월</span>` : ''}${amt ? `<span class="${it.id === 'deficit' ? 'expense' : it.boost ? 'income' : 'muted'}">${amt}</span>` : ''}</span></summary>
+    <summary><b>${it.icon} ${esc(it.title)}</b><span class="gi-r">${g >= 1 ? `<span class="pill ok">🏁 ${g}개월 빨리</span>` : ''}${amt ? `<span class="${it.id === 'deficit' ? 'expense' : it.boost ? 'income' : 'muted'}">${amt}</span>` : ''}</span></summary>
     <div class="sub">${esc(it.why)} <span class="basis ${it.basis}">${Guide.BASIS[it.basis] || ''}${it.src ? ' ' + it.src : ''}</span></div>
     <div class="row guide-btns"><span class="how">→ ${esc(it.how)}</span><span>${it.action ? `<button type="button" class="link-btn" data-guide-act="${it.action}">바로가기 ›</button>` : ''}<button type="button" class="link-btn" data-guide-done="${it.id}">✓ 했어요</button></span></div>
   </details>`;
 }
 function guideHtml(all = false) {
   if (!all && (viewMode !== 'month' || viewMonth !== ym(new Date()))) return '';
-  const items = guideItems();
+  const items = guideItems().filter(it => all ? it.id !== 'profile' : !['saverate', 'deadline'].includes(it.id)); // 홈: ⚖️·🏁 카드와 겹침, 조언: 👤 카드와 겹침
   if (!items.length) return all ? `<section class="card"><h2>🧭 길잡이</h2><div class="empty">✓ 지금 할 일 없음</div></section>` : '';
   const show = all ? items : items.slice(0, 3);
   return `<section class="card guide-card">
@@ -541,9 +535,9 @@ function openProfileSheet() {
 function renderGoalSummary() {
   const avg = avgStats();
   return `<section class="card"><div class="row"><h2>🎯 목표</h2><button class="link-btn" data-goto="goals">전체 ›</button></div>
-    ${state.goals.map(g => { const p = goalPlan(g, avg); return `
+    ${state.goals.filter(g => g !== eokInfo().g).map(g => { const p = goalPlan(g, avg); return `
       <div class="cat-row">
-        <div class="row"><span class="title">${esc(g.name)}</span><span class="muted">${p.progress}% · 월 ${shortWon(p.need)}원</span></div>
+        <div class="row"><span class="title">${esc(g.name)}</span><span class="muted">${p.progress}% · 월 ${shortWon(p.need)}</span></div>
         <div class="bar ${p.shortfall > 0 ? 'over' : ''}"><i style="width:${Math.min(100, p.progress)}%"></i></div>
       </div>`; }).join('')}
   </section>`;
@@ -579,14 +573,14 @@ function renderTx() {
       <input type="radio" name="txmode" id="mList" value="list" ${txMode === 'list' ? 'checked' : ''}><label for="mList">목록</label>
       <input type="radio" name="txmode" id="mCal" value="cal" ${txMode === 'cal' ? 'checked' : ''}><label for="mCal">달력</label>
     </div>
-    <div class="row" style="justify-content:flex-end;margin:-4px 0 6px"><button class="link-btn" data-month-sum>⇣ 월 합계</button></div>
+    <div class="row" style="justify-content:flex-end;margin:-4px 0 6px"><button class="link-btn" data-month-sum>✎ 월 합계 입력</button></div>
     <button class="sms-cta" data-sms>
       <span class="cat-ic" style="--c:var(--gold)">✉</span>
       <span><b>문자·카톡 입력</b></span><span class="chev">›</span>
     </button>
     <section class="card grid2 compact">
-      <div class="stat"><div class="label">기록된 수입</div><div class="value income">${won(s.varIncome)}</div></div>
-      <div class="stat"><div class="label">기록된 지출</div><div class="value expense">${won(s.varExpense)}</div></div>
+      <div class="stat"><div class="label">💵 수입 (기록)</div><div class="value income">+${shortWon(s.varIncome)}</div></div>
+      <div class="stat"><div class="label">🛒 생활비 (기록)</div><div class="value expense">−${shortWon(s.varExpense)}</div></div>
     </section>
     ${Object.keys(bySrc).length > 1 || accounts().length ? `<div class="chips src-chips">${Object.entries(bySrc).sort((a, b) => (b[1].e + b[1].i) - (a[1].e + a[1].i)).map(([k, v]) => {
       const a = k === '-' ? null : acctOf({ acct: k });
@@ -595,7 +589,7 @@ function renderTx() {
     ${selectedDay ? `<div class="row filter-chip"><span>📅 선택한 날</span><button class="link-btn" data-clear-day>✕</button></div>` : ''}
     ${list.length ? Object.entries(groups).map(([d, ts]) => `
       <section class="card">
-        <div class="row day-head"><span>${dayLabel(d)}</span><span class="amount">${dayTotal(ts)}</span></div>
+        <div class="row day-head"><span>${dayLabel(d)}</span><span class="amount">${ts.length > 1 ? dayTotal(ts) : ''}</span></div>
         <ul class="list">${ts.map(txItem).join('')}</ul>
       </section>`).join('') : `<section class="card"><div class="empty">기록 없음</div></section>`}
   `;
@@ -645,35 +639,35 @@ function renderFixed() {
   view.innerHTML = `
     ${fixedSeg()}
     <section class="card">
-      <div class="muted">이번 달 고정지출</div>
+      <div class="muted">🔁 이번 달 고정지출</div>
       <div class="big expense">${won(expTotal)}</div>
-      <div class="muted">${incTotal ? `수입 대비 ${pct(expTotal, incTotal)}%` : '수입 미등록'}${inst.length ? ` · 할부 ${won(sum(inst))}` : ''}${billNow ? ` · 공과금 ${won(billNow)}` : ''}</div>
-      ${sav.length || reserve ? `<div class="muted">${sav.length ? `투자 ${won(sum(sav))} · ` : ''}${reserve ? `적립 ${won(reserve)} · ` : ''}남는 돈 ${won(incTotal - expTotal - sum(sav) - reserve)}</div>` : ''}
+      <div class="muted">${incTotal ? `💵 수입의 ${pct(expTotal, incTotal)}%` : '⚠ 고정 수입 없음'}${inst.length ? ` · 할부 ${shortWon(sum(inst))}` : ''}${billNow ? ` · 공과금 ${shortWon(billNow)}` : ''}</div>
+      ${sav.length || reserve ? `<div class="muted">${[sav.length ? `📈 투자 ${shortWon(sum(sav))}` : '', reserve ? `🫙 적립 ${shortWon(reserve)}` : '', incTotal ? `💰 남는 돈 ${shortWon(incTotal - expTotal - sum(sav) - reserve)}` : ''].filter(Boolean).join(' · ')}</div>` : ''}
       ${endingSoon ? `<div class="muted">다음 달 −${won(endingSoon)} (할부 끝)</div>` : ''}
     </section>
     <button class="sms-cta" data-import-fixed>
-      <span class="cat-ic" style="--c:var(--gold)">⇣</span>
+      <span class="cat-ic" style="--c:var(--gold)">📋</span>
       <span><b>목록 붙여넣기</b></span><span class="chev">›</span>
     </button>
-    ${recur.length ? `<button class="sms-cta" data-recur><span class="cat-ic" style="--c:var(--gold)">🔁</span><span><b>반복 결제 ${recur.length}</b><small>고정으로?</small></span><span class="chev">›</span></button>` : ''}
+    ${recur.length ? `<button class="sms-cta" data-recur><span class="cat-ic" style="--c:var(--gold)">🔁</span><span><b>반복 결제 ${recur.length}건</b><small>고정에 추가</small></span><span class="chev">›</span></button>` : ''}
     <section class="card">
-      <div class="row"><h2>수입 <span class="h-sum income">${won(incTotal)}</span></h2><button class="btn sm ghost" data-add-fixed="income">＋</button></div>
+      <div class="row"><h2>💵 수입 <span class="h-sum income">${shortWon(incTotal)}</span></h2><button class="btn sm ghost" data-add-fixed="income">＋ 추가</button></div>
       ${inc.length ? `<ul class="list">${inc.map(item).join('')}</ul>` : `<div class="empty">없음</div>`}
     </section>
     <section class="card">
-      <div class="row"><h2>지출 <span class="h-sum expense">${won(sum(exp))}</span></h2><button class="btn sm ghost" data-add-fixed="expense">＋</button></div>
+      <div class="row"><h2>💸 지출 <span class="h-sum expense">${shortWon(sum(exp))}</span></h2><button class="btn sm ghost" data-add-fixed="expense">＋ 추가</button></div>
       ${exp.length ? `<ul class="list">${exp.map(item).join('')}</ul>` : `<div class="empty">없음</div>`}
     </section>
     <section class="card">
-      <div class="row"><h2>보험 <span class="h-sum expense">${won(sum(ins))}</span></h2><button class="btn sm ghost" data-add-fixed="insurance">＋</button></div>
+      <div class="row"><h2>🛡️ 보험 <span class="h-sum expense">${shortWon(sum(ins))}</span></h2><button class="btn sm ghost" data-add-fixed="insurance">＋ 추가</button></div>
       ${ins.length ? `<ul class="list">${ins.map(item).join('')}</ul>` : `<div class="empty">없음</div>`}
     </section>
     <section class="card">
-      <div class="row"><h2>투자 <span class="h-sum income">${won(sum(sav))}</span></h2><button class="btn sm ghost" data-add-fixed="saving">＋</button></div>
+      <div class="row"><h2>📈 투자 <span class="h-sum income">${shortWon(sum(sav))}</span></h2><button class="btn sm ghost" data-add-fixed="saving">＋ 추가</button></div>
       ${sav.length ? `<ul class="list">${sav.map(item).join('')}</ul>` : `<div class="empty">없음</div>`}
     </section>
     ${fundsHtml(now)}
-    ${inst.length ? `<section class="card"><div class="row"><h2>할부 <span class="h-sum expense">${won(sum(inst))}</span></h2><button class="link-btn" data-inst-end>모두 빼기</button></div><ul class="list">${inst.map(item).join('')}</ul></section>` : ''}
+    ${inst.length ? `<section class="card"><div class="row"><h2>🧾 할부 <span class="h-sum expense">${shortWon(sum(inst))}</span></h2><button class="link-btn" data-inst-end>모두 빼기</button></div><ul class="list">${inst.map(item).join('')}</ul></section>` : ''}
     ${ended.length ? `<section class="card"><div class="row"><h2 class="muted">끝난 할부 ${ended.length}건</h2><button class="link-btn" data-clear-ended>정리</button></div></section>` : ''}
   `;
 }
@@ -787,8 +781,8 @@ function renderGoals() {
   view.innerHTML = `
     ${assetsHtml()}
     <section class="card">
-      <div class="row"><h2>목표</h2><button class="btn sm" data-add-goal>＋</button></div>
-      <div class="row"><span class="muted">월 저축 여력</span><b>${won(avg.net)}</b></div>
+      <div class="row"><h2>🎯 목표</h2><button class="btn sm" data-add-goal>＋ 추가</button></div>
+      <div class="row"><span class="muted">💰 월 평균 남는 돈</span><b>${shortWon(avg.net)}</b></div>
     </section>
     ${state.goals.length ? state.goals.map(g => goalCard(g, avg)).join('') : `<section class="card"><div class="empty">목표 없음</div></section>`}
   `;
@@ -802,30 +796,30 @@ function goalCard(g, avg) {
   if (ok) {
     advice = `<div class="tip good"><b>✓ 달성 가능</b></div>`;
   } else {
-    advice = `<div class="tip warn"><b>월 ${won(p.shortfall)} 부족</b></div>`;
+    advice = `<div class="tip warn"><b>월 ${shortWon(p.shortfall)} 부족</b></div>`;
     if (p.cuts.length) {
       advice += `<h3>줄일 곳</h3>
-        <table class="mini">${p.cuts.map(c => `<tr><td>${esc(c.category)}</td><td>−${won(c.cut)}</td></tr>`).join('')}</table>`;
+        <table class="mini">${p.cuts.map(c => `<tr><td>${esc(c.category)}</td><td>−${shortWon(c.cut)}</td></tr>`).join('')}</table>`;
     }
     if (!p.cutsCover) {
-      advice += `<div class="hint">그래도 월 ${won(p.remainingAfterCuts)} 부족 → 기한·금액 조정</div>`;
+      advice += `<div class="hint">그래도 월 ${shortWon(p.remainingAfterCuts)} 부족 → 기한·금액 조정</div>`;
     }
   }
-  const horizon = p.months <= 12 ? '예·적금'
-    : p.months <= 36 ? '예금·채권 위주'
-    : '일부 분산 ETF';
+  const horizon = p.months <= 12 ? '1년 안 → 예·적금'
+    : p.months <= 36 ? '3년 안 → 예금·채권 위주'
+    : '3년+ → 분산 ETF 일부';
   return `<section class="card">
     <div class="row"><h2>${esc(g.name)}</h2><button class="link-btn" data-edit-goal="${g.id}">수정</button></div>
-    <div class="row"><span class="big">${shortWon(g.saved)}</span><span class="muted">/ ${won(g.target)}</span></div>
+    <div class="row"><span class="big">${shortWon(g.saved)}</span><span class="muted">/ ${shortWon(g.target)}</span></div>
     <div class="bar ${ok ? '' : 'over'}"><i style="width:${Math.min(100, p.progress)}%"></i></div>
     <table class="mini" style="margin-top:10px">
-      <tr><td>기한</td><td>${g.deadline.replace('-', '.')} · ${p.months}개월</td></tr>
+      <tr><td>⏰ 기한</td><td>${g.deadline.replace('-', '.')} · ${p.months}개월</td></tr>
       <tr><td>수익률</td><td>${g.rate}%</td></tr>
-      <tr><td>월 필요</td><td><b>${won(p.need)}</b></td></tr>
-      <tr><td>예상 도달</td><td>${eta}</td></tr>
+      <tr><td>월 필요</td><td><b>${shortWon(p.need)}</b></td></tr>
+      <tr><td>📅 도달 (남는 돈 전부)</td><td>${eta}</td></tr>
     </table>
     ${advice}
-    <div class="muted" style="margin-top:8px">💡 ${horizon}</div>
+    <div class="muted" style="margin-top:8px">💡 담을 곳: ${horizon}</div>
   </section>`;
 }
 
@@ -834,23 +828,24 @@ function renderInsights() {
   const tips = buildTips(avg);
   const st = state.settings;
   const monthlyExp = avg.expense;
-  const efTarget = monthlyExp * 3;
-  const efOk = monthlyExp > 0 && st.emergency >= efTarget;
+  const gc = guideContext(), efTarget = Math.round((gc.fixed.total + gc.variable) * Guide.emergencyMonths(Object.assign({}, Guide.DEFAULT_PROFILE, st.profile || {})) / 10000) * 10000; // 길잡이와 같은 기준
+  const efCash = Math.max(Number(st.emergency) || 0, (state.assets || []).filter(a => !a.biz && a.kind === '현금').reduce((t, a) => t + (a.balance || 0), 0));
+  const efOk = efTarget > 0 && efCash >= efTarget;
   view.innerHTML = `
     ${profileHtml()}
     ${guideHtml(true)}
     ${coachHtml()}
     ${accountCardHtml()}
     <section class="card">
-      <h2>참고</h2>
+      <h2>📚 참고</h2>
       ${tips.length ? tips.map(t => `<details class="tip ${t.level || ''}"><summary>${esc(t.title)}</summary><div>${t.body}</div></details>`).join('') : `<div class="empty">기록 쌓이는 중</div>`}
     </section>
 
     <section class="card">
-      <h2>투자 순서</h2>
+      <h2>🪜 돈 모으는 순서</h2>
       <ol class="ladder">
         <li class="${st.highDebt ? '' : 'done'}">고금리 빚 상환 ${st.highDebt ? '<span class="pill bad">해당</span>' : '<span class="pill ok">없음</span>'}</li>
-        <li class="${efOk ? 'done' : ''}">비상금 ${shortWon(efTarget)}원 ${efOk ? '<span class="pill ok">충족</span>' : '<span class="pill bad">부족</span>'}</li>
+        <li class="${efOk ? 'done' : ''}">🛟 비상금 ${shortWon(efCash)} / ${shortWon(efTarget)} ${efOk ? '<span class="pill ok">충족</span>' : '<span class="pill bad">부족</span>'}</li>
         <li>적금·청약 (바로 쓸 수 있는 돈)</li>
         <li>분산 ETF 적립 · ISA</li>
         <li>연금저축·IRP는 세액공제용 소액만 🔒</li>
@@ -859,18 +854,18 @@ function renderInsights() {
     </section>
 
     <section class="card">
-      <h2>내 상태</h2>
-      <label>비상금</label>
+      <h2>🛟 내 상태</h2>
+      <label>비상금 (현금)</label>
       <input id="setEmergency" inputmode="numeric" value="${st.emergency ? st.emergency.toLocaleString('ko-KR') : ''}" placeholder="0" />
       <label style="display:flex;align-items:center;gap:8px;color:var(--text)"><input type="checkbox" id="setDebt" style="width:auto" ${st.highDebt ? 'checked' : ''}/> 고금리 빚 있음</label>
     </section>
 
-    <section class="card"><div class="row"><h2>화면</h2>
+    <section class="card"><div class="row"><h2>🎨 화면</h2>
       <div class="seg seg3 theme-seg">${[['light', '☀️ 밝게'], ['dark', '🌙 어둡게'], ['auto', '⚙ 자동']].map(([v, l]) => `<button type="button" class="${getTheme() === v ? 'on' : ''}" data-theme-set="${v}">${l}</button>`).join('')}</div></div></section>
     ${acctsHtml()}
     ${catsHtml()}
     <section class="card">
-      <h2>데이터</h2>
+      <h2>💾 데이터</h2>
       <div class="actions">
         <button class="btn ghost" id="exportBtn">백업</button>
         <button class="btn ghost" id="importBtn">복원</button>
@@ -1041,11 +1036,11 @@ function buildTips(avg) {
   } else if (avg.net < 0) {
     tips.push({ level: 'warn', title: `적자: 매달 평균 ${won(-avg.net)} 초과 지출`, body: '목표·투자보다 적자 해소가 먼저입니다. 아래 항목 중 큰 것부터 줄이세요.' });
   } else if (rate < 0.1) {
-    tips.push({ level: 'warn', title: `저축률 ${Math.round(rate * 100)}% — 낮음`, body: '흔히 쓰는 기준은 최소 20%입니다. 월급날 저축액을 먼저 자동이체로 빼고 남은 돈으로 생활하는 "선저축 후지출"로 바꿔보세요.' });
+    tips.push({ level: 'warn', title: `💰 남는 비율 ${Math.round(rate * 100)}% — 낮음`, body: '흔히 쓰는 기준은 최소 20%입니다. 월급날 저축액을 먼저 자동이체로 빼고 남은 돈으로 생활하는 "선저축 후지출"로 바꿔보세요.' });
   } else if (rate >= 0.3) {
-    tips.push({ level: 'good', title: `저축률 ${Math.round(rate * 100)}% — 좋음`, body: '모이는 돈이 그냥 입출금 통장에 머물지 않도록 목표별 계좌로 나눠 두세요.' });
+    tips.push({ level: 'good', title: `💰 남는 비율 ${Math.round(rate * 100)}% — 좋음`, body: '모이는 돈이 그냥 입출금 통장에 머물지 않도록 목표별 계좌로 나눠 두세요.' });
   } else {
-    tips.push({ title: `저축률 ${Math.round(rate * 100)}%`, body: '나쁘지 않습니다. 20~30% 구간을 유지하면 목표 달성 속도가 안정적이에요.' });
+    tips.push({ title: `💰 남는 비율 ${Math.round(rate * 100)}%`, body: '나쁘지 않습니다. 20~30% 구간을 유지하면 목표 달성 속도가 안정적이에요.' });
   }
 
   if (inc > 0 && avg.fixedExpense / inc > 0.5) {
@@ -1406,7 +1401,7 @@ function renderBills() {
       ${totPrev ? `<div class="muted">지난달 ${won(totPrev)} ${tot >= totPrev ? '▲' : '▼'} ${won(Math.abs(tot - totPrev))}</div>` : ''}
     </section>
     ${cands.length ? `<button class="sms-cta" data-bill-migrate><span class="cat-ic" style="--c:var(--gold)">⇄</span><span><b>고정에서 옮기기 ${cands.length}</b><small>${cands.map(f => esc(f.name)).join(' · ')}</small></span><span class="chev">›</span></button>` : ''}
-    <button class="sms-cta" data-bill-import><span class="cat-ic" style="--c:var(--gold)">⇣</span><span><b>공과금 붙여넣기</b></span><span class="chev">›</span></button>
+    <button class="sms-cta" data-bill-import><span class="cat-ic" style="--c:var(--gold)">📋</span><span><b>공과금 붙여넣기</b></span><span class="chev">›</span></button>
     <section class="card">
       <div class="row"><h2>공과금 <span class="h-sum expense">${won(tot)}</span></h2><button class="btn sm ghost" data-add-bill>＋</button></div>
       ${bills.length ? `<ul class="list">${bills.map(b => {
@@ -1806,7 +1801,7 @@ function acctsHtml() {
   return `<section class="card">
     <div class="row"><h2>🏦 출처</h2><button class="btn sm ghost" data-add-acct>＋</button></div>
     ${list.length ? `<ul class="list">${list.map(a => `<li data-acct="${a.id}"><div class="li-main"><span class="cat-ic" style="--c:${a.biz ? 'var(--muted)' : 'var(--gold)'}">${a.kind === '카드' ? '💳' : a.kind === '페이' ? '📱' : '🏦'}</span><div><div class="title">${esc(a.name)}${a.biz ? ' <span class="pill">💼 사업</span>' : ''}</div><div class="sub">${a.kind} · ${cnt(a.id)}건</div></div></div><span class="chev">›</span></li>`).join('')}</ul>` : '<div class="empty">알림이 오면 자동 추가</div>'}
-    <details class="hint"><summary>💼 사업용?</summary>사업용으로 표시한 계좌·카드의 거래와 자산은 기록만 하고 통계·예산·1억 목표에서 뺌. 사업 계좌에서 내 계좌로 옮긴 돈은 내 계좌에 수입(부수입)으로 기록.</details>
+    <details class="hint"><summary>? 💼 사업용 표시</summary>사업용으로 표시한 계좌·카드의 거래와 자산은 기록만 하고 통계·예산·1억 목표에서 뺌. 사업 계좌에서 내 계좌로 옮긴 돈은 내 계좌에 수입(부수입)으로 기록.</details>
   </section>`;
 }
 function openAcctSheet(a) {
@@ -1885,13 +1880,13 @@ function fundsHtml(now) {
   const item = f => {
     const x = fundInfo(f, now);
     return `<li data-fund="${f.id}"><div class="li-main">${catIcon(f.category || '기타')}<div><div class="title">${esc(f.name)}</div>
-      <div class="sub">${(f.months || []).map(n => n + '월').join('·')} ${shortWon(f.amount)} · 잔액 ${won(x.balance)}${x.due ? ` · ${x.short ? `<b class="expense">${Number(x.due.slice(5))}월 부족 ${shortWon(x.short)}</b>` : `${Number(x.due.slice(5))}월 ✓`}` : ''}</div></div></div>
-      <div class="amount saving">${won(x.monthly)}</div></li>`;
+      <div class="sub">${(f.months || []).map(n => n + '월').join('·')} ${shortWon(f.amount)} · 잔액 ${shortWon(x.balance)}${x.due ? ` · ${x.short ? `<b class="expense">${Number(x.due.slice(5))}월 부족 ${shortWon(x.short)}</b>` : `${Number(x.due.slice(5))}월 ✓`}` : ''}</div></div></div>
+      <div class="amount saving">월 ${shortWon(x.monthly)}</div></li>`;
   };
   return `<section class="card">
-    <div class="row"><h2>💼 적립 <span class="h-sum income">${won(total)}</span></h2><button class="btn sm ghost" data-add-fund>＋</button></div>
+    <div class="row"><h2>🫙 적립 <span class="h-sum income">${shortWon(total)}</span></h2><button class="btn sm ghost" data-add-fund>＋ 추가</button></div>
     ${list.length ? `<ul class="list">${list.map(item).join('')}</ul>` : `<div class="empty">없음</div>`}
-    <details class="hint"><summary>적립?</summary>자동차세·연간 보험·명절·경조사처럼 가끔 오는 큰 지출을 1년치로 잡아 매달 1/12씩 떼어 둠. 파킹통장 하나에 모아 두고, 그 돈으로 낸 지출은 예산에서 빠짐.</details>
+    <details class="hint"><summary>? 적립이란</summary>자동차세·연간 보험·명절·경조사처럼 가끔 오는 큰 지출을 1년치로 잡아 매달 1/12씩 떼어 둠. 파킹통장 하나에 모아 두고, 그 돈으로 낸 지출은 예산에서 빠짐.</details>
   </section>`;
 }
 function openFundSheet(f) {
