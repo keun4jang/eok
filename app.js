@@ -741,6 +741,8 @@ function refreshAccount() {
 // (중복 의심·고정 항목과 겹침은 건너뜀, 승인취소는 원 거래 삭제). 등록된 거래에는 auto 표시.
 // 자동 수집은 '모든 앱'에서 올 수 있어, 금융기관 표시가 있는 알림만 받는다(친구 카톡 "3만원 입금했어" 같은 것 제외)
 const FIN_MARK = /카드|은행|뱅크|BANK|페이|Pay|증권|Web발신|잔액|누적|일시불|할부|체크|\b(KB|NH|IBK|SC|BC|KEB|SH)\b|토스|카카오뱅크|케이뱅크|우체국|새마을|신협|농협|수협/i;
+const TX_MARK = /승인|결제|사용|입금|출금|이체|취소|일시불|할부|잔액|누적|지급|환불|충전|송금|출금|인출/;
+const looksLikeSentence = memo => { const m = String(memo || '').trim(); return /^\d+\s*[.)]\s/.test(m) || m.length > 22 || /[(（]\s*$/.test(m); };
 function ingest(texts) {
   // 알림 1건씩 해석해 결과를 '수집 기록'에 남긴다(안 들어온 이유를 폰에서 바로 확인하기 위해)
   let added = 0, removed = 0, balUp = 0, ignored = 0;
@@ -748,10 +750,14 @@ function ingest(texts) {
   for (const raw of texts) {
     const text = String(raw || '').trim();
     if (!FIN_MARK.test(text)) { ignored++; log.push({ at: Date.now(), r: '무시', text: text.slice(0, 40) }); continue; } // 금융 알림 아님: 앞부분만
+    // 금융 단어가 있어도 거래 동작(승인·입금 등)이 없으면 안내·광고·메모 알림 → 자동 등록 안 함
+    if (!TX_MARK.test(text)) { log.push({ at: Date.now(), r: '해석 실패', text: text.slice(0, 300) }); continue; }
     const items = buildSmsItems(text);
     const res = [];
     for (const it of items) {
       if (applyBalance(it)) { balUp++; res.push('잔액'); }
+      // 가맹점 자리에 문장이 들어오면(목록 번호로 시작, 너무 김) 결제 알림이 아닐 가능성이 큼 → 자동 등록 대신 확인 요청
+      if (it.on && it.type !== 'cancel' && looksLikeSentence(it.memo)) { res.push('확인 필요'); continue; }
       if (!it.on) { res.push(it.dup ? '중복' : it.fixedHit ? '고정' : it.type === 'cancel' ? '취소 대상 없음' : '제외'); continue; }
       if (it.type === 'cancel') { if (it.cancelTarget) { state.tx = state.tx.filter(t => t.id !== it.cancelTarget); removed++; res.push('취소'); } continue; }
       if (it.billId && recordBill(it)) { added++; res.push('공과금'); continue; }
@@ -769,10 +775,10 @@ function ingest(texts) {
 function ingestLogHtml() {
   const list = state.settings.ingestLog || [];
   if (!list.length) return '<p class="hint">📥 기록 없음</p>';
-  const bad = list.filter(x => /실패|제외|대상 없음/.test(x.r)).length;
+  const bad = list.filter(x => /실패|제외|대상 없음|확인 필요/.test(x.r)).length;
   const t = ms => { const d = new Date(ms); return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
   return `<details class="ilog"><summary>📥 기록 ${list.length}${bad ? ` · <b class="expense">실패 ${bad}</b>` : ''}</summary>
-    <ul class="list">${list.map((x, i) => `<li><div><div class="sub">${t(x.at)} <span class="pill ${x.r.includes('등록') || x.r === '공과금' || x.r === '취소' ? 'ok' : /실패|제외|대상 없음/.test(x.r) ? 'bad' : ''}">${esc(x.r)}</span></div>
+    <ul class="list">${list.map((x, i) => `<li><div><div class="sub">${t(x.at)} <span class="pill ${x.r.includes('등록') || x.r === '공과금' || x.r === '취소' ? 'ok' : /실패|제외|대상 없음|확인 필요/.test(x.r) ? 'bad' : ''}">${esc(x.r)}</span></div>
       <div class="ilog-text">${esc(x.text)}</div></div>${x.r !== '무시' ? `<button class="link-btn" data-ilog="${i}">✉</button>` : ''}</li>`).join('')}</ul>
     <button class="link-btn" data-ilog-clear>지우기</button></details>`;
 }
