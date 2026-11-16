@@ -152,7 +152,7 @@ main { max-width: 640px; margin: 0 auto; padding: 8px 16px; }
 .hero-split span { font-size: 11px; color: var(--hero-sub); letter-spacing: .04em; }
 .hero-split b { font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .hero-split span { font-size: 13px; letter-spacing: 0; }
-.hero-split small { font-size: 11px; color: var(--hero-sub); white-space: nowrap; }
+.hero-split small { font-size: 11px; color: var(--hero-sub); line-height: 1.5; }
 .hero-split small .dot { width: 6px; height: 6px; margin: 0 2px 0 4px; }
 .hero-split small .dot:first-child { margin-left: 0; }
 .hero-stack { position: relative; display: flex; height: 10px; border-radius: 99px; overflow: hidden; background: var(--hero-line); }
@@ -495,7 +495,7 @@ details.hint summary { cursor: pointer; }
 .src-list { margin: 6px 0 0; padding-left: 18px; }
 .src-list li { margin: 4px 0; }
 .src-list a { color: inherit; text-decoration: underline; word-break: break-all; }
-.guide-btns .link-btn { font-size: 16px; padding: 2px 8px; }
+.guide-btns .link-btn { font-size: 13px; padding: 2px 8px; white-space: nowrap; }
 .seg.seg4 { grid-template-columns: repeat(4, 1fr); }
 .seg.seg4 label, .seg.seg3 label { padding: 9px 2px; font-size: 13px; white-space: nowrap; }
 [data-profile] { cursor: pointer; }
