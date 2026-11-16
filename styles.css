@@ -469,19 +469,22 @@ details.hint summary { cursor: pointer; }
 .alloc-bar .half { position: absolute; left: 50%; top: -3px; bottom: -3px; width: 2px; margin-left: -1px; background: var(--text); opacity: .5; border-radius: 2px; }
 
 /* 길잡이 */
-.guide-item { padding: 12px 0; border-bottom: 1px solid var(--line); }
+.guide-item { padding: 11px 0; border-bottom: 1px solid var(--line); }
 .guide-item:last-of-type { border-bottom: 0; }
-.guide-item b { font-size: 15px; }
-.guide-item .sub { color: var(--muted); font-size: 12px; margin-top: 2px; }
-.guide-item .how { font-size: 13px; margin-top: 4px; }
+.guide-item summary { display: flex; justify-content: space-between; align-items: center; gap: 8px; list-style: none; cursor: pointer; }
+.guide-item summary::-webkit-details-marker { display: none; }
+.guide-item b { font-size: 15px; font-weight: 600; }
+.guide-item .gi-r { display: flex; align-items: center; gap: 6px; font-size: 14px; white-space: nowrap; }
+.guide-item .sub { color: var(--muted); font-size: 12px; margin-top: 6px; }
+.guide-item .how { font-size: 13px; }
 .guide-item.p1 b { color: var(--expense); }
-.guide-btns { margin-top: 4px; }
+.guide-btns { margin-top: 4px; align-items: center; }
 .basis { display: inline-block; font-size: 10px; line-height: 16px; padding: 0 6px; margin-right: 4px; border-radius: 5px; background: var(--surface-2); color: var(--muted); vertical-align: 1px; white-space: nowrap; }
 .basis.stat { background: var(--good-soft); color: var(--income); }
 .src-list { margin: 6px 0 0; padding-left: 18px; }
 .src-list li { margin: 4px 0; }
 .src-list a { color: inherit; text-decoration: underline; word-break: break-all; }
-.guide-btns .link-btn { font-size: 12px; }
+.guide-btns .link-btn { font-size: 16px; padding: 2px 8px; }
 .seg.seg4 { grid-template-columns: repeat(4, 1fr); }
 .seg.seg4 label, .seg.seg3 label { padding: 9px 2px; font-size: 13px; white-space: nowrap; }
 [data-profile] { cursor: pointer; }

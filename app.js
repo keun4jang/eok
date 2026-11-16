@@ -357,19 +357,19 @@ function eokHtml() {
     <div class="eok-bar"><i style="width:${p}%"></i>${e.steps.slice(0, -1).map(v => `<b class="${e.cur >= v ? 'on' : ''}" style="left:${pct(v, e.target)}%"></b>`).join('')}</div>
     <div class="eok-steps">${e.steps.map(v => `<span class="${e.cur >= v ? 'on' : v === e.next ? 'next' : ''}">${e.cur >= v ? '✓ ' : ''}${shortWon(v)}</span>`).join('')}</div>
     <table class="mini">
-      ${e.cur < e.next ? `<tr><td>🎯 다음 ${shortWon(e.next)}원</td><td>${shortWon(e.next - e.cur)}원 남음</td></tr>` : ''}
-      ${(() => { const lk = (state.assets || []).filter(a => !a.biz && a.kind !== '부채' && isPension(a)).reduce((t, a) => t + (a.balance || 0), 0); return lk ? `<tr><td>🔒 그중 연금 (바로 못 씀)</td><td class="muted">${shortWon(lk)}원</td></tr>` : ''; })()}
-      <tr><td>💪 매달 모으는 돈</td><td>${won(e.pace)}</td></tr>
-      <tr data-biz-goal><td>💼 이번 달 사업 순수익</td><td><span class="${e.biz < 0 ? 'expense' : e.biz > 0 ? 'income' : ''}">${e.biz > 0 ? '+' : e.biz < 0 ? '−' : ''}${shortWon(Math.abs(e.biz))}원</span>${e.bizGoal ? ` / ${shortWon(e.bizGoal)}원` : ' · 목표 정하기'} ›</td></tr>
+      ${e.cur < e.next ? `<tr><td>🎯 ${shortWon(e.next)}</td><td>−${shortWon(e.next - e.cur)}</td></tr>` : ''}
+      ${(() => { const lk = (state.assets || []).filter(a => !a.biz && a.kind !== '부채' && isPension(a)).reduce((t, a) => t + (a.balance || 0), 0); return lk ? `<tr><td>🔒 연금</td><td class="muted">${shortWon(lk)}</td></tr>` : ''; })()}
+      <tr><td>💪 매달</td><td>${shortWon(e.pace)}</td></tr>
+      <tr data-biz-goal><td>💼 사업</td><td><span class="${e.biz < 0 ? 'expense' : e.biz > 0 ? 'income' : ''}">${e.biz > 0 ? '+' : e.biz < 0 ? '−' : ''}${shortWon(Math.abs(e.biz))}</span>${e.bizGoal ? ` / ${shortWon(e.bizGoal)}` : ''} ›</td></tr>
       ${e.bizGoal ? `<tr><td colspan="2"><div class="bar"><i style="width:${Math.min(100, Math.max(0, pct(e.biz, e.bizGoal)))}%"></i></div></td></tr>` : ''}
-      <tr><td>📅 이 속도면</td><td>${etaLabel(e.now, e.months)}</td></tr>
-      ${e.deadline && e.cur < e.target ? `<tr><td>⏰ ${e.deadline.replace('-', '.')}까지 하려면</td><td>월 ${shortWon(e.need)}원${short ? ` <b class="expense">(+${shortWon(short)})</b>` : ' ✓'}</td></tr>` : ''}
-      ${e.bizGoal && isFinite(e.monthsBiz) && e.cur < e.target ? `<tr><td>🚀 사업 목표까지 채우면</td><td class="income">${etaLabel(e.now, e.monthsBiz)}</td></tr>` : ''}
-      ${e.faster >= 1 ? `<tr><td>⚡ 월 10만 더 모으면</td><td class="income">${e.faster}개월 빨리</td></tr>` : ''}
+      <tr><td>📅 도달</td><td>${etaLabel(e.now, e.months)}</td></tr>
+      ${e.deadline && e.cur < e.target ? `<tr><td>⏰ ${e.deadline.replace('-', '.')}</td><td>${shortWon(e.need)}${short ? ` <b class="expense">+${shortWon(short)}</b>` : ' ✓'}</td></tr>` : ''}
+      ${e.bizGoal && isFinite(e.monthsBiz) && e.cur < e.target ? `<tr><td>🚀 사업 목표 시</td><td class="income">${etaLabel(e.now, e.monthsBiz)}</td></tr>` : ''}
+      ${e.faster >= 1 ? `<tr><td>⚡ +10만</td><td class="income">−${e.faster}개월</td></tr>` : ''}
     </table>
     ${eokStepLog()}
     ${eokBars()}
-    <details class="hint" onclick="event.stopPropagation()"><summary>계산?</summary>수익률 0%로 보수적으로 계산. 매달 모으는 돈 = 고정 탭의 투자·적금 합계. 사업 = '사업' 카테고리 수입 − 지출. 목표 금액·기한은 목표 탭에서.</details>
+    <details class="hint" onclick="event.stopPropagation()"><summary>?</summary>수익률 0%. 매달 = 고정 탭 투자·적금 합계. 사업 = 사업 수입 − 지출.</details>
   </section>`;
 }
 // 단계 달성 기록: settings.eokSteps = { 금액: 'YYYY-MM-DD' | '' }. 처음 실행 때 이미 넘은 단계는 날짜 없이 기록(축하 없음)
@@ -426,15 +426,15 @@ function allocHtml() {
   const cell = v => `${v < 0 ? '−' : ''}${shortWon(Math.abs(v))}원 <span class="muted">${P(v)}</span>`;
   const ok = sav >= fixed + living;
   const lines = [];
-  if (ok) lines.push(`✓ 억 원칙 지킴: 저축 ${P(sav)} ≥ 지출 ${P(fixed + living)}`);
-  else if (rLiving >= 0) lines.push(`⚠ 억 원칙: 저축을 ${shortWon(rSav)}원(${P(rSav)})으로, 생활비는 ${shortWon(rLiving)}원까지`);
-  else lines.push(`⛔ 고정비만 ${P(fixed)} → 억 원칙을 지키려면 고정비부터 월 ${shortWon(-rLiving)}원 줄이거나 수익(사업)을 늘려야 함`);
+  if (ok) lines.push(`✓ 저축 ${P(sav)} ≥ 지출 ${P(fixed + living)}`);
+  else if (rLiving >= 0) lines.push(`⚠ 생활비 ${shortWon(rLiving)}까지`);
+  else lines.push(`⛔ 고정비 −${shortWon(-rLiving)} 필요`);
   if (has) {
-    if (tLiving < 0) lines.push(`⛔ ${e.deadline.replace('-', '.')}까지는 수익만으론 월 ${shortWon(-tLiving)}원 부족 → 사업 순수익 또는 기한 조정`);
-    else if (e.need > rSav) lines.push(`⏰ ${e.deadline.replace('-', '.')}까지 하려면 원칙보다 더: 월 ${shortWon(e.need)}원 저축`);
-    else lines.push(`⏰ 억 원칙만 지켜도 ${e.deadline.replace('-', '.')} 안에 달성`);
+    if (tLiving < 0) lines.push(`⛔ ${e.deadline.replace('-', '.')}: 월 ${shortWon(-tLiving)} 부족`);
+    else if (e.need > rSav) lines.push(`⏰ ${e.deadline.replace('-', '.')}: 월 ${shortWon(e.need)}`);
+    else lines.push(`⏰ ${e.deadline.replace('-', '.')} ✓`);
   }
-  if (pen > sav * 0.2) lines.push(`🔒 연금 ${shortWon(pen)}원은 바로 못 쓰는 돈 → 비상금·적금을 먼저 채우고 연금은 소액만`);
+  if (pen > sav * 0.2) lines.push(`🔒 연금 ${shortWon(pen)} 많음`);
   return `<section class="card">
     <div class="row"><h2>📊 수익 배분</h2><span class="muted">수익 ${shortWon(income)}원</span></div>
     <div class="alloc-bar"><i class="a-fix" style="width:${w(fixed)}%"></i><i class="a-liv" style="width:${w(living)}%"></i><i class="a-sav" style="width:${w(sav)}%"></i><b class="half"></b></div>
@@ -445,7 +445,7 @@ function allocHtml() {
       <tr><td><b class="dot a-sav"></b>저축·투자</td><td>${cell(sav)}</td><td>${cell(rSav)}</td>${has && tSav > rSav ? `<td>${cell(tSav)}</td>` : ''}</tr>
     </table>
     ${lines.map(l => `<div class="hint">${l}</div>`).join('')}
-    <details class="hint"><summary>억 원칙?</summary>저축·투자가 지출(고정비+생활비)보다 많게 = 수익의 50% 이상 저축. 순서: 비상금(생활비 3개월) → 적금·청약 → 바로 팔 수 있는 투자 → 연금은 세액공제용 소액만(중도 인출이 어려움). 수익률은 0%로 계산.</details>
+    <details class="hint"><summary>?</summary>저축 ≥ 지출(수익 50%+). 비상금 → 적금 → 투자 → 연금 소액. 수익률 0%.</details>
   </section>`;
 }
 
@@ -493,12 +493,13 @@ function eokGain(amount) { // 매달 amount를 더 모으면 억이 몇 개월 �
 }
 function guideRow(it) {
   const g = it.boost ? eokGain(it.impact) : 0;
-  return `<div class="guide-item p${Math.min(it.pri, 4)}">
-    <div class="row"><b>${it.icon} ${esc(it.title)}</b>${it.impact ? `<span class="${it.boost ? 'income' : 'muted'}">월 ${shortWon(it.impact)}</span>` : ''}</div>
-    <div class="sub"><span class="basis ${it.basis}">${Guide.BASIS[it.basis] || ''}${it.src ? ' ' + it.src : ''}</span>${esc(it.why)}</div>
-    <div class="how">→ ${esc(it.how)}${g >= 1 ? ` <span class="pill ok">🏁 ${g}개월 빨리</span>` : ''}</div>
-    <div class="row guide-btns">${it.action ? `<button type="button" class="link-btn" data-guide-act="${it.action}">바로 하기 ›</button>` : '<span></span>'}<button type="button" class="link-btn" data-guide-done="${it.id}">✓ 했어요</button></div>
-  </div>`;
+  // 접힌 상태는 한 줄(아이콘·제목·금액). 눌러야 숫자·할 일·근거가 보임
+  const amt = it.impact ? (it.id === 'deficit' ? `−${shortWon(it.impact)}` : `${it.boost ? '+' : ''}${shortWon(it.impact)}`) : '';
+  return `<details class="guide-item p${Math.min(it.pri, 4)}">
+    <summary><b>${it.icon} ${esc(it.title)}</b><span class="gi-r">${g >= 1 ? `<span class="pill ok">🏁−${g}개월</span>` : ''}${amt ? `<span class="${it.id === 'deficit' ? 'expense' : it.boost ? 'income' : 'muted'}">${amt}</span>` : ''}</span></summary>
+    <div class="sub">${esc(it.why)} <span class="basis ${it.basis}">${Guide.BASIS[it.basis] || ''}${it.src ? ' ' + it.src : ''}</span></div>
+    <div class="row guide-btns"><span class="how">→ ${esc(it.how)}</span><span>${it.action ? `<button type="button" class="link-btn" data-guide-act="${it.action}" aria-label="바로 하기">›</button>` : ''}<button type="button" class="link-btn" data-guide-done="${it.id}" aria-label="했어요">✓</button></span></div>
+  </details>`;
 }
 function guideHtml(all = false) {
   if (!all && (viewMode !== 'month' || viewMonth !== ym(new Date()))) return '';
@@ -508,9 +509,9 @@ function guideHtml(all = false) {
   return `<section class="card guide-card">
     <div class="row"><h2>🧭 길잡이</h2>${!all && items.length > 3 ? `<button class="link-btn" data-goto="insights">전체 ${items.length} ›</button>` : ''}</div>
     ${show.map(guideRow).join('')}
-    ${all ? `<details class="hint"><summary>근거?</summary>
-      <span class="basis stat">통계</span>공식 통계 원문에서 확인한 값 · <span class="basis">일반 기준</span>흔히 쓰는 기준(보험 5~10%, 주거비 30%, 통신 월 7만, 비상금 3~6개월) — 정답 아닌 점검 신호 · <span class="basis">내 기록</span>입력한 기록으로 계산 · <span class="basis">내 설정</span>👤 내 상황·억 원칙. 수익률 0% 가정.
-      <ol class="src-list">${Object.entries(Guide.SOURCES).map(([k, s]) => `<li><b>${k}</b> ${esc(s.label)} ${esc(s.show)} — ${esc(s.org)}, 발표 ${s.date}, 확인 ${s.checked}. ${esc(s.note)}<br><a href="${s.url}" target="_blank" rel="noopener">${esc(s.url)}</a></li>`).join('')}</ol>
+    ${all ? `<details class="hint"><summary>근거</summary>
+      <span class="basis stat">통계</span>공식 원문 · <span class="basis">일반 기준</span>점검 신호(정답 ✕) · <span class="basis">내 기록</span> · <span class="basis">내 설정</span>
+      <ol class="src-list">${Object.entries(Guide.SOURCES).map(([k, s]) => `<li><b>${k}</b> ${esc(s.label)} ${esc(s.show)} · <a href="${s.url}" target="_blank" rel="noopener">${esc(s.org)}</a> (${s.date}) · ${esc(s.note)}</li>`).join('')}</ol>
     </details>` : ''}
   </section>`;
 }
@@ -529,7 +530,7 @@ function profileHtml() {
   return `<section class="card" data-profile>
     <div class="row"><h2>👤 내 상황</h2><span class="chev">›</span></div>
     ${p ? `<div class="chips">${Object.keys(PROFILE_LABEL).map(k => `<span class="chip" style="--c:var(--gold)">${v(k, k === 'dependents' ? (p[k] ? '1' : '0') : p[k])}</span>`).join('')}</div>
-      <div class="hint">비상금 기준 생활비 ${Guide.emergencyMonths(p)}개월</div>` : '<div class="empty">설정하면 나에게 맞춘 추천</div>'}
+      <div class="hint">🛟 ${Guide.emergencyMonths(p)}개월</div>` : '<div class="empty">미설정</div>'}
   </section>`;
 }
 function openProfileSheet() {
@@ -538,7 +539,7 @@ function openProfileSheet() {
     const cur = k === 'dependents' ? (p[k] ? '1' : '0') : String(p[k]);
     return `<input type="radio" name="${k}" id="pf-${k}-${val}" value="${val}" ${cur === val ? 'checked' : ''}><label for="pf-${k}-${val}">${l}</label>`; }).join('')}</div>`;
   openSheet(`<h2>👤 내 상황</h2>${Object.keys(PROFILE_OPTS).map(seg).join('')}
-    <div class="hint">기기·계정에 저장. 상황이 바뀌면 다시 고치면 추천도 바뀜</div>`,
+    `,
     fd => { state.settings.profile = { job: fd.job, home: fd.home, dependents: fd.dependents === '1', risk: fd.risk, pension: fd.pension, saveRate: Number(fd.saveRate) || 50 }; });
 }
 
