@@ -1398,7 +1398,25 @@ function applyBalance(it) {
   if (!a) return false;
   a.balance = it.balance; a.updated = it.date || todayStr(); return true;
 }
-function assetsDaily() { const c = autoAccrue() | syncLinkedGoals() | snapshotDaily(); if (c) save(); }
+function assetsDaily() { const c = autoAccrue() | syncLinkedGoals() | snapshotDaily() | fixIssuerMemos(); if (c) save(); }
+// 예전 해석 오류 보정: '삼성7811승인 … 쿠팡' 알림이 가맹점 '삼성'으로 들어간 것을 수집 기록 원문으로 다시 해석
+const ISSUER_ONLY = /^(KB국민|국민|삼성|신한|현대|하나|우리|롯데|농협|기업|씨티|카카오|토스|케이|비씨|BC|NH|IBK)$/;
+function fixIssuerMemos() {
+  let changed = false;
+  const mc = state.merchantCats || {};
+  for (const k of Object.keys(mc)) if (ISSUER_ONLY.test(k.trim())) { delete mc[k]; changed = true; } // 잘못 학습된 '삼성' 같은 키 제거
+  const bad = state.tx.filter(t => t.auto && ISSUER_ONLY.test(String(t.memo || '').trim()));
+  if (!bad.length) return changed;
+  const parsed = (state.settings.ingestLog || []).flatMap(x => SmsParser.parseNotifications(x.text).results);
+  for (const t of bad) {
+    const r = parsed.find(r => r.amount === t.amount && r.date === t.date && r.merchant && !ISSUER_ONLY.test(r.merchant));
+    if (!r) continue;
+    t.memo = r.merchant;
+    if (t.category === '기타' || !t.category) t.category = learnedCat(r.merchant) || r.category || t.category;
+    changed = true;
+  }
+  return changed;
+}
 
 function sparkline(points, w = 300, h = 44) {
   if (points.length < 2) return '';
