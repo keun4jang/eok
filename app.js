@@ -2024,7 +2024,7 @@ function budgetInfo(m = currentPeriodMonth()) {
 function budgetHtml() {
   if (viewMode !== 'month' || viewMonth !== ym(new Date())) return '';
   const b = budgetInfo();
-  if (!b.budget) return `<button class="sms-cta" data-budget><span class="cat-ic" style="--c:var(--gold)">💰</span><span><b>💰 생활비 예산 정하기</b><small>한도 ${shortWon(b.room)}</small></span><span class="chev">›</span></button>`;
+  if (!b.budget) return `<button class="sms-cta" data-budget><span class="cat-ic" style="--c:var(--gold)">💰</span><span><b>생활비 예산 정하기</b><small>한도 ${shortWon(b.room)}</small></span><span class="chev">›</span></button>`;
   const p = Math.min(100, pct(b.spent, b.budget)), over = b.spent > b.budget, warn = !over && p >= 80;
   return `<section class="card" data-budget>
     <div class="row"><h2>💰 생활비 예산 <span class="muted" style="font-weight:400;font-size:12px">${b.period.from.slice(5).replace('-', '/')}~${b.period.to.slice(5).replace('-', '/')}</span></h2><span class="muted">${shortWon(b.spent)} / ${shortWon(b.budget)}</span></div>
