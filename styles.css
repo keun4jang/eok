@@ -451,4 +451,10 @@ details.hint summary { cursor: pointer; }
 .eok-bar > b.on { background: var(--surface); opacity: .7; }
 .eok-steps { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); margin-bottom: 8px; font-variant-numeric: tabular-nums; }
 .eok-steps .on { color: var(--income); }
-.eok-steps .next { color: var(--gold); font-weight: 700; }
+.eok-steps .next { color: var(--gold); font-weight: 700; }.eok-months { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; height: 96px; margin: 12px 0 4px; align-items: end; }
+.eok-months > div { display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; gap: 2px; }
+.eok-months i { display: block; width: 70%; border-radius: 6px 6px 2px 2px; background: color-mix(in srgb, var(--gold) 35%, transparent); flex: none; max-height: calc(100% - 30px); }
+.eok-months .cur i { background: linear-gradient(180deg, var(--gold-hi), var(--gold)); }
+.eok-months small { font-size: 10px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.eok-months span { font-size: 10px; color: var(--muted); }
+[data-biz-goal] { cursor: pointer; }

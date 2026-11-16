@@ -338,7 +338,9 @@ function eokInfo() {
   const steps = [0.1, 0.3, 0.5, 0.7, 1].map(r => Math.round(target * r));
   const next = steps.find(v => v > cur) || target;
   const faster = pace > 0 && isFinite(months) ? months - monthsToReach(target, cur, pace + 100000, 0) : 0;
-  return { g, target, cur, now, pace, biz, months, need, steps, next, faster, deadline: g?.deadline || '' };
+  const bizGoal = Number(state.settings.bizGoal) || 0;
+  const monthsBiz = bizGoal > 0 ? monthsToReach(target, cur, pace + bizGoal, 0) : Infinity;
+  return { g, target, cur, now, pace, biz, bizGoal, monthsBiz, months, need, steps, next, faster, deadline: g?.deadline || '' };
 }
 const etaLabel = (now, months) => !isFinite(months) || months > 600 ? '–' : months <= 0 ? '달성 🎉' : monthLabel(shiftMonth(now, months));
 function eokHtml() {
@@ -355,13 +357,45 @@ function eokHtml() {
     <table class="mini">
       ${e.cur < e.next ? `<tr><td>🎯 다음 ${shortWon(e.next)}원</td><td>${shortWon(e.next - e.cur)}원 남음</td></tr>` : ''}
       <tr><td>💪 매달 모으는 돈</td><td>${won(e.pace)}</td></tr>
-      ${e.biz ? `<tr><td>💼 이번 달 사업</td><td class="${e.biz < 0 ? 'expense' : 'income'}">${e.biz > 0 ? '+' : '−'}${won(Math.abs(e.biz))}</td></tr>` : ''}
+      <tr data-biz-goal><td>💼 이번 달 사업 순수익</td><td><span class="${e.biz < 0 ? 'expense' : e.biz > 0 ? 'income' : ''}">${e.biz > 0 ? '+' : e.biz < 0 ? '−' : ''}${shortWon(Math.abs(e.biz))}원</span>${e.bizGoal ? ` / ${shortWon(e.bizGoal)}원` : ' · 목표 정하기'} ›</td></tr>
+      ${e.bizGoal ? `<tr><td colspan="2"><div class="bar"><i style="width:${Math.min(100, Math.max(0, pct(e.biz, e.bizGoal)))}%"></i></div></td></tr>` : ''}
       <tr><td>📅 이 속도면</td><td>${etaLabel(e.now, e.months)}</td></tr>
       ${e.deadline && e.cur < e.target ? `<tr><td>⏰ ${e.deadline.replace('-', '.')}까지 하려면</td><td>월 ${shortWon(e.need)}원${short ? ` <b class="expense">(+${shortWon(short)})</b>` : ' ✓'}</td></tr>` : ''}
+      ${e.bizGoal && isFinite(e.monthsBiz) && e.cur < e.target ? `<tr><td>🚀 사업 목표까지 채우면</td><td class="income">${etaLabel(e.now, e.monthsBiz)}</td></tr>` : ''}
       ${e.faster >= 1 ? `<tr><td>⚡ 월 10만 더 모으면</td><td class="income">${e.faster}개월 빨리</td></tr>` : ''}
     </table>
+    ${eokStepLog()}
+    ${eokBars()}
     <details class="hint" onclick="event.stopPropagation()"><summary>계산?</summary>수익률 0%로 보수적으로 계산. 매달 모으는 돈 = 고정 탭의 투자·적금 합계. 사업 = '사업' 카테고리 수입 − 지출. 목표 금액·기한은 목표 탭에서.</details>
   </section>`;
+}
+// 단계 달성 기록: settings.eokSteps = { 금액: 'YYYY-MM-DD' | '' }. 처음 실행 때 이미 넘은 단계는 날짜 없이 기록(축하 없음)
+function checkEokSteps() {
+  const e = eokInfo(); if (!e.g) return false;
+  const first = !state.settings.eokSteps, rec = state.settings.eokSteps || {};
+  let changed = first; const hit = [];
+  for (const v of e.steps) if (e.cur >= v && !(v in rec)) { rec[v] = first ? '' : todayStr(); changed = true; if (!first) hit.push(v); }
+  if (changed) state.settings.eokSteps = rec;
+  if (hit.length) setTimeout(() => toast(`🎉 ${shortWon(hit.at(-1))}원 달성!`), 600);
+  return changed;
+}
+function eokStepLog() {
+  const rec = Object.entries(state.settings.eokSteps || {}).filter(([, d]) => d).sort((a, b) => b[1].localeCompare(a[1]));
+  return rec.length ? `<div class="hint">🏆 ${rec.slice(0, 3).map(([v, d]) => `${shortWon(Number(v))}원 ${d.slice(2).replace(/-/g, '.')}`).join(' · ')}</div>` : '';
+}
+// 최근 6개월 '모은 돈'(투자·적금) 막대
+function eokBars() {
+  const now = ym(new Date()), start = startMonth();
+  const ms = [5, 4, 3, 2, 1, 0].map(i => { const m = shiftMonth(now, -i); return { m, v: m < start ? 0 : monthStats(m).saving }; }); // 기록 시작 전 달은 0(고정 항목이 가짜로 잡히지 않게)
+  const max = Math.max(...ms.map(x => x.v));
+  if (!(max > 0)) return '';
+  return `<div class="eok-months">${ms.map(x => `<div class="${x.m === now ? 'cur' : ''}"><small>${x.v ? shortWon(x.v) : ''}</small><i style="height:${Math.max(2, Math.round(x.v / max * 100))}%"></i><span>${Number(x.m.slice(5))}월</span></div>`).join('')}</div>`;
+}
+function openBizGoalSheet() {
+  openSheet(`<h2>💼 사업 순수익 목표</h2>
+    <label>월 목표</label><input name="bizGoal" data-money inputmode="numeric" value="${moneyVal(state.settings.bizGoal)}" placeholder="0" />
+    <div class="hint">순수익 = '사업' 수입 − '사업' 지출. 0이면 목표 없음.</div>`,
+    fd => { state.settings.bizGoal = parseAmount(fd.bizGoal); });
 }
 // 어떤 지출을 매달 줄여 모으면 억이 얼마나 빨라지는지
 function eokFasterHint(amount) {
@@ -1478,7 +1512,7 @@ function applyBalance(it) {
   if (!a) return false;
   a.balance = it.balance; a.updated = it.date || todayStr(); return true;
 }
-function assetsDaily() { const c = autoAccrue() | syncLinkedGoals() | snapshotDaily() | fixIssuerMemos() | renameIncomeCat(); if (c) save(); }
+function assetsDaily() { const c = autoAccrue() | syncLinkedGoals() | snapshotDaily() | fixIssuerMemos() | renameIncomeCat() | checkEokSteps(); if (c) save(); }
 // 사용자 요청: 수입 카테고리 '급여' → '수익'(급여 외 수입도 있어서). 예전 기록·고정 항목·학습값을 옮긴다(동기화로 다른 기기에도 반영)
 function renameIncomeCat() {
   let changed = false;
@@ -2038,9 +2072,10 @@ $('#monthLabel').onclick = () => openPicker();
 $('#fab').onclick = () => openTxSheet();
 
 view.addEventListener('click', e => {
-  const el = e.target.closest('[data-theme-set],[data-cat-detail],[data-src],[data-acct],[data-add-acct],[data-ilog],[data-ilog-clear],[data-fund],[data-add-fund],[data-recur],[data-inst-end],[data-budget],[data-classify],[data-del-cat],#addCatBtn,[data-asset],[data-add-asset],[data-month-sum],[data-bill-import],[data-bill-paid],[data-bill],[data-add-bill],[data-bill-migrate],[data-open-month],[data-import-fixed],[data-clear-ended],[data-sms],[data-day],[data-clear-day],[data-edit-tx],[data-edit-fixed],[data-add-fixed],[data-edit-goal],[data-add-goal],[data-goto],#exportBtn,#importBtn,#resetBtn,#updateBtn,#loginBtn,#logoutBtn,#syncBtn,#dropBtn,#coachBtn,[data-copy]');
+  const el = e.target.closest('[data-biz-goal],[data-theme-set],[data-cat-detail],[data-src],[data-acct],[data-add-acct],[data-ilog],[data-ilog-clear],[data-fund],[data-add-fund],[data-recur],[data-inst-end],[data-budget],[data-classify],[data-del-cat],#addCatBtn,[data-asset],[data-add-asset],[data-month-sum],[data-bill-import],[data-bill-paid],[data-bill],[data-add-bill],[data-bill-migrate],[data-open-month],[data-import-fixed],[data-clear-ended],[data-sms],[data-day],[data-clear-day],[data-edit-tx],[data-edit-fixed],[data-add-fixed],[data-edit-goal],[data-add-goal],[data-goto],#exportBtn,#importBtn,#resetBtn,#updateBtn,#loginBtn,#logoutBtn,#syncBtn,#dropBtn,#coachBtn,[data-copy]');
   if (!el) return;
-  if (el.dataset.themeSet) { setTheme(el.dataset.themeSet); render(); }
+  if ('bizGoal' in el.dataset) openBizGoalSheet();
+  else if (el.dataset.themeSet) { setTheme(el.dataset.themeSet); render(); }
   else if (el.dataset.catDetail) openCatSheet(el.dataset.catDetail, el.dataset.scope);
   else if (el.dataset.src) { txSrc = txSrc === el.dataset.src ? '' : el.dataset.src; render(); }
   else if (el.dataset.acct) openAcctSheet(accounts().find(a => a.id === el.dataset.acct));
