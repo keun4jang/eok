@@ -394,3 +394,6 @@ details.hint summary { cursor: pointer; }
 .ilog summary { cursor: pointer; font-size: 13px; margin-top: 10px; }
 .ilog li { align-items: flex-start; gap: 8px; }
 .ilog-text { font-size: 12px; color: var(--muted); white-space: pre-wrap; word-break: break-all; margin-top: 2px; }
+.src-chips { margin: 0 0 10px; }
+.src-chips .chip small { color: var(--muted); font-size: 11px; margin-left: 2px; }
+.chip.on { background: color-mix(in srgb, var(--c) 30%, transparent); border-color: var(--c); font-weight: 600; }

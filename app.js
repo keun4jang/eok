@@ -49,6 +49,7 @@ let viewMonth = ym(new Date());
 let viewMode = 'month'; // 'month' | 'year'
 let txMode = 'list';      // 'list' | 'cal'
 let selectedDay = null;   // 달력에서 선택한 날짜
+let txSrc = '';           // 내역 탭 출처 필터 ('' 전체, '-' 출처 없음, 계좌 id)
 
 function load() {
   try {
@@ -80,6 +81,31 @@ function adopt(next) {
 }
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 
+/* ===================== 출처(계좌·카드) ===================== */
+// settings.accounts = [{id, name, kind:'은행'|'카드'|'페이', biz, match}]
+// biz(사업용)인 출처의 거래·자산은 기록은 하되 통계·예산·1억 목표에서 뺀다.
+const SOURCES = [ // 알림 원문에서 출처 자동 인식 (카드를 은행보다 먼저 검사)
+  ['신한카드', '카드', /신한카드/], ['삼성카드', '카드', /삼성카드/], ['현대카드', '카드', /현대카드/], ['KB국민카드', '카드', /KB국민카드|국민카드/],
+  ['하나카드', '카드', /하나카드/], ['우리카드', '카드', /우리카드/], ['롯데카드', '카드', /롯데카드/], ['BC카드', '카드', /BC카드|비씨카드/], ['NH농협카드', '카드', /NH농협카드|농협카드/],
+  ['토스뱅크', '은행', /토스뱅크/], ['카카오뱅크', '은행', /카카오뱅크/], ['케이뱅크', '은행', /케이뱅크/],
+  ['신한은행', '은행', /신한/], ['하나은행', '은행', /하나은행|KEB/], ['IBK기업은행', '은행', /IBK|기업은행/], ['KB국민은행', '은행', /국민은행|KB스타|KB국민/],
+  ['우리은행', '은행', /우리은행|우리WON/], ['NH농협', '은행', /농협|NH/], ['우체국', '은행', /우체국/], ['새마을금고', '은행', /새마을/],
+  ['카카오페이', '페이', /카카오페이/], ['네이버페이', '페이', /네이버페이|N[Pp]ay/], ['토스', '페이', /토스/],
+];
+const accounts = () => state.settings.accounts || [];
+const acctOf = t => t && t.acct ? accounts().find(a => a.id === t.acct) : null;
+const isBiz = t => !!acctOf(t)?.biz;
+// 원문에서 출처 찾기: 사용자가 정한 키워드(match) 우선, 없으면 표에서 찾아 자동 추가
+function detectAcct(raw, create = true) {
+  const text = String(raw || '');
+  const own = accounts().find(a => String(a.match || '').split(',').map(k => k.trim()).filter(Boolean).some(k => text.includes(k)));
+  if (own) return own.id;
+  const hit = SOURCES.find(([, , re]) => re.test(text)); if (!hit) return '';
+  let a = accounts().find(x => x.name === hit[0]);
+  if (!a && create) { a = { id: uid(), name: hit[0], kind: hit[1], biz: false, match: '' }; state.settings.accounts = [...accounts(), a]; }
+  return a ? a.id : '';
+}
+
 /* ===================== 유틸 ===================== */
 function ym(d) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; }
 function shiftMonth(m, delta) {
@@ -108,7 +134,7 @@ const monthLabel = m => { const [y, mo] = m.split('-'); return `${y}년 ${Number
 // 실제 기록 월: 과거 달을 '월 합계'(수입 포함)로 통째로 넣은 달. 이 달은 고정 항목·공과금 추정을 쓰지 않는다(이중 계산 방지).
 const isActualMonth = m => state.tx.some(t => t.sum && t.type === 'income' && t.date.startsWith(m));
 function monthStats(m) {
-  const txs = state.tx.filter(t => t.date.startsWith(m));
+  const txs = state.tx.filter(t => t.date.startsWith(m) && !isBiz(t)); // 사업용 출처는 제외
   const actual = isActualMonth(m);
   const varIncome = sum(txs.filter(t => t.type === 'income'));
   const varExpense = sum(txs.filter(t => t.type === 'expense'));
@@ -288,7 +314,7 @@ function renderGoalSummary() {
 
 function txItem(t) {
   return `<li data-edit-tx="${t.id}">
-    <div class="li-main">${catIcon(t.category, t.type)}<div><div class="title">${esc(t.memo || t.category)}</div><div class="sub">${esc(t.category)} · ${Number(t.date.slice(8))}일${t.auto ? ' · <span class="pill">자동</span>' : ''}</div></div></div>
+    <div class="li-main">${catIcon(t.category, t.type)}<div><div class="title">${esc(t.memo || t.category)}</div><div class="sub">${esc(t.category)} · ${Number(t.date.slice(8))}일${acctOf(t) ? ` · ${esc(acctOf(t).name)}` : ''}${isBiz(t) ? ' <span class="pill">사업</span>' : ''}${t.auto ? ' <span class="pill">자동</span>' : ''}</div></div></div>
     <div class="amount ${t.type === 'saving' ? 'income' : t.type}">${t.type === 'income' ? '+' : t.type === 'saving' ? '↗' : '−'}${won(t.amount)}</div>
   </li>`;
 }
@@ -297,13 +323,18 @@ const WEEK = ['일', '월', '화', '수', '목', '금', '토'];
 function renderTx() {
   if (viewMode === 'year') return renderYearTx();
   const s = monthStats(viewMonth);
-  const list = [...s.txs]
+  const monthAll = state.tx.filter(t => t.date.startsWith(viewMonth)); // 사업용 포함(표시용)
+  const bySrc = {};
+  monthAll.forEach(t => { const k = t.acct && acctOf(t) ? t.acct : '-'; const b = (bySrc[k] = bySrc[k] || { i: 0, e: 0, n: 0 }); b.n++; if (t.type === 'income') b.i += t.amount; else if (t.type === 'expense') b.e += t.amount; });
+  if (txSrc && !bySrc[txSrc]) txSrc = '';
+  const list = monthAll
     .filter(t => !selectedDay || t.date === selectedDay)
+    .filter(t => !txSrc || (txSrc === '-' ? !acctOf(t) : t.acct === txSrc))
     .sort((a, b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id));
   const groups = {};
   list.forEach(t => (groups[t.date] = groups[t.date] || []).push(t));
   const dayLabel = d => { const dt = new Date(d + 'T00:00'); return `${dt.getMonth() + 1}월 ${dt.getDate()}일 ${WEEK[dt.getDay()]}요일`; };
-  const dayTotal = ts => { const e = sum(ts.filter(t => t.type === 'expense')), i = sum(ts.filter(t => t.type === 'income'));
+  const dayTotal = ts => { ts = ts.filter(t => !isBiz(t)); const e = sum(ts.filter(t => t.type === 'expense')), i = sum(ts.filter(t => t.type === 'income'));
     return `${i ? `<span class="income">+${won(i)}</span> ` : ''}${e ? `<span>−${won(e)}</span>` : ''}`; };
 
   view.innerHTML = `
@@ -320,6 +351,9 @@ function renderTx() {
       <div class="stat"><div class="label">기록된 수입</div><div class="value income">${won(s.varIncome)}</div></div>
       <div class="stat"><div class="label">기록된 지출</div><div class="value expense">${won(s.varExpense)}</div></div>
     </section>
+    ${Object.keys(bySrc).length > 1 || accounts().length ? `<div class="chips src-chips">${Object.entries(bySrc).sort((a, b) => (b[1].e + b[1].i) - (a[1].e + a[1].i)).map(([k, v]) => {
+      const a = k === '-' ? null : acctOf({ acct: k });
+      return `<button class="chip ${txSrc === k ? 'on' : ''}" data-src="${k}" style="--c:${a?.biz ? 'var(--muted)' : 'var(--gold)'}">${a ? esc(a.name) : '출처 없음'}${a?.biz ? ' 💼' : ''} <small>${v.e ? '−' + shortWon(v.e) : ''}${v.i ? ' +' + shortWon(v.i) : ''}</small></button>`; }).join('')}</div>` : ''}
     ${txMode === 'cal' ? calendar(s) : ''}
     ${selectedDay ? `<div class="row filter-chip"><span>📅 선택한 날</span><button class="link-btn" data-clear-day>✕</button></div>` : ''}
     ${list.length ? Object.entries(groups).map(([d, ts]) => `
@@ -589,6 +623,7 @@ function renderInsights() {
       <label style="display:flex;align-items:center;gap:8px;color:var(--text)"><input type="checkbox" id="setDebt" style="width:auto" ${st.highDebt ? 'checked' : ''}/> 고금리 빚 있음</label>
     </section>
 
+    ${acctsHtml()}
     ${catsHtml()}
     <section class="card">
       <h2>데이터</h2>
@@ -720,7 +755,8 @@ function ingest(texts) {
       if (!it.on) { res.push(it.dup ? '중복' : it.fixedHit ? '고정' : it.type === 'cancel' ? '취소 대상 없음' : '제외'); continue; }
       if (it.type === 'cancel') { if (it.cancelTarget) { state.tx = state.tx.filter(t => t.id !== it.cancelTarget); removed++; res.push('취소'); } continue; }
       if (it.billId && recordBill(it)) { added++; res.push('공과금'); continue; }
-      state.tx.push({ id: uid(), type: it.type, amount: it.amount, category: it.category, memo: it.memo.trim(), date: it.date, auto: true, ...(it.fundId ? { fund: it.fundId } : {}) });
+      const acct = detectAcct(it.raw || text);
+      state.tx.push({ id: uid(), type: it.type, amount: it.amount, category: it.category, memo: it.memo.trim(), date: it.date, auto: true, ...(it.fundId ? { fund: it.fundId } : {}), ...(acct ? { acct } : {}) });
       added++; res.push('등록');
     }
     log.push({ at: Date.now(), r: res.length ? [...new Set(res)].join('·') : '해석 실패', text: text.slice(0, 300) });
@@ -877,11 +913,12 @@ function openTxSheet(t) {
     <label>카테고리</label><select name="category">${catOptions(t.type, t.category)}</select>
     <label>메모</label><input name="memo" value="${esc(t.memo)}" placeholder="예: 점심, 편의점" maxlength="40" />
     <label>날짜</label><input name="date" type="date" required value="${t.date}" />
+    ${accounts().length ? `<label>출처</label><select name="acct"><option value="">–</option>${accounts().map(a => `<option value="${a.id}" ${t.acct === a.id ? 'selected' : ''}>${esc(a.name)}${a.biz ? ' (사업)' : ''}</option>`).join('')}</select>` : ''}
     ${(state.funds || []).length ? `<label>💼 적립금에서</label><select name="fund"><option value="">아니오</option>${state.funds.map(f => `<option value="${f.id}" ${t.fund === f.id ? 'selected' : ''}>${esc(f.name)}</option>`).join('')}</select>` : ''}`,
     fd => {
       const amount = parseAmount(fd.amount);
       if (!amount) { alert('금액을 입력하세요'); return false; }
-      const rec = { id: t.id || uid(), type: fd.type, amount, category: fd.category, memo: fd.memo.trim(), date: fd.date, ...(t.sum ? { sum: true } : {}), ...(t.auto ? { auto: true } : {}), ...(fd.fund && fd.type === 'expense' ? { fund: fd.fund } : {}) };
+      const rec = { id: t.id || uid(), type: fd.type, amount, category: fd.category, memo: fd.memo.trim(), date: fd.date, ...(t.sum ? { sum: true } : {}), ...(t.auto ? { auto: true } : {}), ...(fd.fund && fd.type === 'expense' ? { fund: fd.fund } : {}), ...(fd.acct ? { acct: fd.acct } : {}) };
       if (isNew) state.tx.push(rec); else state.tx[state.tx.findIndex(x => x.id === t.id)] = rec;
       viewMonth = rec.date.slice(0, 7);
     },
@@ -999,7 +1036,8 @@ function smsItemsFrom(results) {
       (normName(f.name).slice(0, 2) === normName(memo).slice(0, 2) || (f.day && Math.abs(Number(r.date.slice(8)) - f.day) <= 2)));
     const bill = type === 'expense' ? billMatch(memo) : null;
     const fund = type === 'expense' && !bill ? fundMatch(memo) : null;
-    const extra = { balance: r.balance ?? null, raw: r.raw || '', fundId: fund?.id || '', fundName: fund?.name || '' };
+    const acct = detectAcct(r.raw || memo, false);
+    const extra = { balance: r.balance ?? null, raw: r.raw || '', fundId: fund?.id || '', fundName: fund?.name || '', acct };
     return { type, amount: r.amount, date: r.date, memo, category, dup, fixedHit: fixedHit ? fixedHit.name : '', billId: bill?.id || '', billName: bill?.name || '', ...extra, cancelTarget,
       on: type === 'cancel' ? !!cancelTarget : !dup && (!fixedHit || !!bill) };
   });
@@ -1061,7 +1099,8 @@ function saveSmsItems() {
       continue;
     }
     if (it.billId && recordBill(it)) { added++; continue; }
-    state.tx.push({ id: uid(), type: it.type, amount: it.amount, category: it.category, memo: it.memo.trim(), date: it.date, ...(it.fundId ? { fund: it.fundId } : {}) });
+    const acct = detectAcct(it.raw || it.memo);
+    state.tx.push({ id: uid(), type: it.type, amount: it.amount, category: it.category, memo: it.memo.trim(), date: it.date, ...(it.fundId ? { fund: it.fundId } : {}), ...(acct ? { acct } : {}) });
     if (it.memo.trim()) state.merchantCats[it.memo.trim()] = it.category; // 다음에 같은 가맹점이면 이 카테고리로
     added++;
   }
@@ -1315,7 +1354,8 @@ function migrateBills() {
 const ASSET_KINDS = ['현금', '예적금', '투자', '코인', '보증금', '기타자산', '부채'];
 const ASSET_ICON = { 현금: '💵', 예적금: '🏦', 투자: '📈', 코인: '🪙', 보증금: '🏠', 기타자산: '💎', 부채: '💳' };
 function assetTotals() {
-  const a = state.assets || [];
+  let a = state.assets || [];
+  a = a.filter(x => !x.biz); // 사업용 자산은 1억 목표·순자산에서 제외
   const debt = a.filter(x => x.kind === '부채').reduce((s, x) => s + (x.balance || 0), 0);
   const fin = a.filter(x => !['부채', '보증금'].includes(x.kind)).reduce((s, x) => s + (x.balance || 0), 0);
   const all = a.filter(x => x.kind !== '부채').reduce((s, x) => s + (x.balance || 0), 0);
@@ -1396,11 +1436,12 @@ function openAssetSheet(x) {
       <div><label>매월 자동 +</label><input name="monthly" data-money inputmode="numeric" value="${moneyVal(x.monthly)}" placeholder="0"></div>
       <div><label>적립일</label><input name="day" type="number" min="1" max="31" value="${x.day || ''}"></div>
     </div>
-    <label>🔔 알림 연결 (끝 4자리 등)</label><input name="match" value="${esc(x.match || '')}" placeholder="예: 5106" maxlength="20">`,
+    <label>🔔 알림 연결 (끝 4자리 등)</label><input name="match" value="${esc(x.match || '')}" placeholder="예: 5106" maxlength="20">
+    <label style="display:flex;align-items:center;gap:8px;color:var(--text)"><input type="checkbox" name="biz" style="width:auto" ${x.biz ? 'checked' : ''}/> 💼 사업용 (목표·순자산 제외)</label>`,
     fd => {
       if (!fd.name.trim()) { alert('이름을 입력하세요'); return false; }
       const now = new Date(), day = Number(fd.day) || '', monthly = parseAmount(fd.monthly), bal = parseAmount(fd.balance);
-      const rec = { id: x.id || uid(), name: fd.name.trim(), kind: fd.kind, balance: bal, monthly, day, match: fd.match.trim(),
+      const rec = { id: x.id || uid(), name: fd.name.trim(), kind: fd.kind, balance: bal, monthly, day, match: fd.match.trim(), ...(fd.biz ? { biz: true } : {}),
         updated: bal !== x.balance || isNew ? todayStr() : x.updated,
         // 적립 시작점: 잔액을 직접 고친 경우 그 시점부터 다시 계산
         accruedTo: monthly ? ((isNew || bal !== x.balance || !x.accruedTo) ? (now.getDate() >= (day || 1) ? ym(now) : shiftMonth(ym(now), -1)) : x.accruedTo) : '' };
@@ -1414,7 +1455,7 @@ function openAssetSheet(x) {
 
 /* ===================== 분류 필요 · 카테고리 관리 ===================== */
 // '기타'로 들어간 건별 지출(월 합계 제외) → 사용자가 고르고, 같은 가맹점은 학습
-const uncategorized = () => state.tx.filter(t => t.type === 'expense' && t.category === '기타' && !t.sum);
+const uncategorized = () => state.tx.filter(t => t.type === 'expense' && t.category === '기타' && !t.sum && !isBiz(t));
 function openClassifySheet() {
   const draw = () => {
     const list = uncategorized().sort((a, b) => b.date.localeCompare(a.date));
@@ -1442,6 +1483,33 @@ function openClassifySheet() {
   draw(); sheet.showModal();
 }
 
+function acctsHtml() {
+  const list = accounts();
+  const cnt = id => state.tx.filter(t => t.acct === id).length;
+  return `<section class="card">
+    <div class="row"><h2>🏦 출처</h2><button class="btn sm ghost" data-add-acct>＋</button></div>
+    ${list.length ? `<ul class="list">${list.map(a => `<li data-acct="${a.id}"><div class="li-main"><span class="cat-ic" style="--c:${a.biz ? 'var(--muted)' : 'var(--gold)'}">${a.kind === '카드' ? '💳' : a.kind === '페이' ? '📱' : '🏦'}</span><div><div class="title">${esc(a.name)}${a.biz ? ' <span class="pill">💼 사업</span>' : ''}</div><div class="sub">${a.kind} · ${cnt(a.id)}건</div></div></div><span class="chev">›</span></li>`).join('')}</ul>` : '<div class="empty">알림이 오면 자동 추가</div>'}
+    <details class="hint"><summary>💼 사업용?</summary>사업용으로 표시한 계좌·카드의 거래와 자산은 기록만 하고 통계·예산·1억 목표에서 뺌. 사업 계좌에서 내 계좌로 옮긴 돈은 내 계좌에 수입(부수입)으로 기록.</details>
+  </section>`;
+}
+function openAcctSheet(a) {
+  const isNew = !a;
+  a = a || { name: '', kind: '은행', biz: false, match: '' };
+  openSheet(`<h2>${isNew ? '출처 추가' : esc(a.name)}</h2>
+    <div class="grid2">
+      <div><label>이름</label><input name="name" required value="${esc(a.name)}" placeholder="예: 하나은행" maxlength="20"></div>
+      <div><label>종류</label><select name="kind">${['은행', '카드', '페이'].map(k => `<option ${k === a.kind ? 'selected' : ''}>${k}</option>`).join('')}</select></div>
+    </div>
+    <label>알림 키워드</label><input name="match" value="${esc(a.match || '')}" placeholder="예: 하나, 1234" maxlength="40">
+    <label style="display:flex;align-items:center;gap:8px;color:var(--text)"><input type="checkbox" name="biz" style="width:auto" ${a.biz ? 'checked' : ''}/> 💼 사업용 (통계·목표 제외)</label>
+    ${isNew ? '' : `<div class="hint">이 출처 거래 ${state.tx.filter(t => t.acct === a.id).length}건</div>`}`,
+    fd => {
+      if (!fd.name.trim()) { alert('이름을 입력하세요'); return false; }
+      const rec = { id: a.id || uid(), name: fd.name.trim(), kind: fd.kind, biz: !!fd.biz, match: fd.match.trim() };
+      state.settings.accounts = isNew ? [...accounts(), rec] : accounts().map(x => x.id === a.id ? rec : x);
+    },
+    isNew ? null : () => { state.settings.accounts = accounts().filter(x => x.id !== a.id); state.tx.forEach(t => { if (t.acct === a.id) delete t.acct; }); });
+}
 function catsHtml() {
   const cc = state.settings.customCats || {};
   const chip = (c, kind) => `<span class="chip" style="--c:${catColor(c)}">${esc(c)}${(cc[kind] || []).includes(c) ? ` <button class="x" data-del-cat="${kind}|${esc(c)}">✕</button>` : ''}</span>`;
@@ -1560,7 +1628,7 @@ function recurringCandidates() {
   const hidden = new Set(state.settings.recurHide || []);
   const groups = {};
   for (const t of state.tx) {
-    if (t.type !== 'expense' || t.sum || t.fund || !t.memo || t.date.slice(0, 7) < from) continue;
+    if (t.type !== 'expense' || t.sum || t.fund || isBiz(t) || !t.memo || t.date.slice(0, 7) < from) continue;
     const k = normName(t.memo); if (k.length < 2 || hidden.has(k)) continue;
     (groups[k] = groups[k] || []).push(t);
   }
@@ -1632,7 +1700,7 @@ function budgetInfo(m = currentPeriodMonth()) {
   const s = monthStats((state.settings.budget?.startDay || 1) > 1 ? shiftMonth(m, 1) : m);
   const room = s.income - s.fixedExpense - s.saving - s.reserve;
   const p = budgetPeriod(m);
-  const spent = state.tx.filter(t => t.type === 'expense' && !t.sum && !t.fund && t.date >= p.from && t.date <= p.to).reduce((a, t) => a + t.amount, 0); // 적립금에서 낸 지출은 예산에서 제외
+  const spent = state.tx.filter(t => t.type === 'expense' && !t.sum && !t.fund && !isBiz(t) && t.date >= p.from && t.date <= p.to).reduce((a, t) => a + t.amount, 0); // 적립금에서 낸 지출은 예산에서 제외
   const budget = state.settings.budget?.monthly || 0;
   const today = todayStr(), isCur = today >= p.from && today <= p.to;
   const day = isCur ? Math.round((new Date(today) - new Date(p.from)) / 864e5) + 1 : p.days;
@@ -1825,9 +1893,12 @@ $('#monthLabel').onclick = () => openPicker();
 $('#fab').onclick = () => openTxSheet();
 
 view.addEventListener('click', e => {
-  const el = e.target.closest('[data-ilog],[data-ilog-clear],[data-fund],[data-add-fund],[data-recur],[data-inst-end],[data-budget],[data-classify],[data-del-cat],#addCatBtn,[data-asset],[data-add-asset],[data-month-sum],[data-bill-import],[data-bill-paid],[data-bill],[data-add-bill],[data-bill-migrate],[data-open-month],[data-import-fixed],[data-clear-ended],[data-sms],[data-day],[data-clear-day],[data-edit-tx],[data-edit-fixed],[data-add-fixed],[data-edit-goal],[data-add-goal],[data-goto],#exportBtn,#importBtn,#resetBtn,#updateBtn,#loginBtn,#logoutBtn,#syncBtn,#dropBtn,#coachBtn,[data-copy]');
+  const el = e.target.closest('[data-src],[data-acct],[data-add-acct],[data-ilog],[data-ilog-clear],[data-fund],[data-add-fund],[data-recur],[data-inst-end],[data-budget],[data-classify],[data-del-cat],#addCatBtn,[data-asset],[data-add-asset],[data-month-sum],[data-bill-import],[data-bill-paid],[data-bill],[data-add-bill],[data-bill-migrate],[data-open-month],[data-import-fixed],[data-clear-ended],[data-sms],[data-day],[data-clear-day],[data-edit-tx],[data-edit-fixed],[data-add-fixed],[data-edit-goal],[data-add-goal],[data-goto],#exportBtn,#importBtn,#resetBtn,#updateBtn,#loginBtn,#logoutBtn,#syncBtn,#dropBtn,#coachBtn,[data-copy]');
   if (!el) return;
-  if (el.dataset.ilog) { const x = (state.settings.ingestLog || [])[Number(el.dataset.ilog)]; if (x) openSmsSheet(x.text); }
+  if (el.dataset.src) { txSrc = txSrc === el.dataset.src ? '' : el.dataset.src; render(); }
+  else if (el.dataset.acct) openAcctSheet(accounts().find(a => a.id === el.dataset.acct));
+  else if ('addAcct' in el.dataset) openAcctSheet();
+  else if (el.dataset.ilog) { const x = (state.settings.ingestLog || [])[Number(el.dataset.ilog)]; if (x) openSmsSheet(x.text); }
   else if ('ilogClear' in el.dataset) { state.settings.ingestLog = []; save(); render(); }
   else if (el.dataset.fund) openFundSheet(state.funds.find(f => f.id === el.dataset.fund));
   else if ('addFund' in el.dataset) openFundSheet();
