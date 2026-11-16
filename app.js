@@ -402,7 +402,7 @@ function renderFixed() {
       ${sav.length ? `<ul class="list">${sav.map(item).join('')}</ul>` : `<div class="empty">없음</div>`}
     </section>
     ${fundsHtml(now)}
-    ${inst.length ? `<section class="card"><div class="row"><h2>할부 <span class="h-sum expense">${won(sum(inst))}</span></h2><button class="link-btn" data-inst-end>모두 이번 달 종료</button></div><ul class="list">${inst.map(item).join('')}</ul></section>` : ''}
+    ${inst.length ? `<section class="card"><div class="row"><h2>할부 <span class="h-sum expense">${won(sum(inst))}</span></h2><button class="link-btn" data-inst-end>모두 빼기</button></div><ul class="list">${inst.map(item).join('')}</ul></section>` : ''}
     ${ended.length ? `<section class="card"><div class="row"><h2 class="muted">끝난 할부 ${ended.length}건</h2><button class="link-btn" data-clear-ended>정리</button></div></section>` : ''}
   `;
 }
@@ -1833,8 +1833,9 @@ view.addEventListener('click', e => {
   else if ('addFund' in el.dataset) openFundSheet();
   else if ('recur' in el.dataset) openRecurSheet();
   else if ('instEnd' in el.dataset) {
-    const now = ym(new Date()), list = state.fixed.filter(f => f.until && f.until > now);
-    if (list.length && confirm(`할부 ${list.length}건을 이번 달로 끝낼까요? (완납·선결제 했을 때)`)) { list.forEach(f => { f.until = now; }); save(); render(); toast(`할부 ${list.length}건 종료`); }
+    // 카드로 산 할부는 산 달에 전액 지출로 기록되므로(문자·월 합계), 고정 할부를 계속 두면 이중 계산이 된다 → 지난달로 끝냄
+    const now = ym(new Date()), list = state.fixed.filter(f => f.until && f.until >= now);
+    if (list.length && confirm(`할부 ${list.length}건을 이번 달부터 뺄까요?\n(산 달에 이미 지출로 기록됨 · 선결제·완납했을 때도)`)) { list.forEach(f => { f.until = shiftMonth(now, -1); }); save(); render(); toast(`할부 ${list.length}건 정리`); }
   }
   else if ('budget' in el.dataset) openBudgetSheet();
   else if ('classify' in el.dataset) openClassifySheet();
