@@ -274,7 +274,7 @@ function renderHome() {
           <div class="donut-center"><span>변동지출</span><b>${shortWon(s.varExpense)}원</b></div>
         </div>
         <ul class="list cats">${cats.map(([c, v]) => `
-          <li><div class="li-main">${catIcon(c)}<div><div class="title">${esc(c)}</div><div class="sub">${v / s.varExpense < 0.01 ? '1% 미만' : pct(v, s.varExpense) + '%'}</div></div></div>
+          <li data-cat-detail="${esc(c)}" data-scope="month"><div class="li-main">${catIcon(c)}<div><div class="title">${esc(c)}</div><div class="sub">${v / s.varExpense < 0.01 ? '1% 미만' : pct(v, s.varExpense) + '%'}</div></div></div>
           <div class="amount">${won(v)}</div></li>`).join('')}</ul>`
         : `<div class="empty">기록 없음</div>`}
     </section>
@@ -1480,6 +1480,36 @@ function openAssetSheet(x) {
 /* ===================== 분류 필요 · 카테고리 관리 ===================== */
 // '기타'로 들어간 건별 지출(월 합계 제외) → 사용자가 고르고, 같은 가맹점은 학습
 const uncategorized = () => state.tx.filter(t => t.type === 'expense' && t.category === '기타' && !t.sum && !isBiz(t));
+// 홈 '지출 구성'에서 카테고리를 누르면: 그 기간의 해당 카테고리 내역·가맹점별 합계·전 기간 비교
+function openCatSheet(cat, scope = 'month') {
+  const y = viewMonth.slice(0, 4);
+  const pick = key => state.tx.filter(t => t.type === 'expense' && t.category === cat && !isBiz(t) && t.date.startsWith(key)); // key: 'YYYY-MM' 또는 'YYYY'
+  const key = scope === 'year' ? y : viewMonth, prevKey = scope === 'year' ? String(Number(y) - 1) : shiftMonth(viewMonth, -1);
+  const list = pick(key).sort((a, b) => b.date.localeCompare(a.date) || b.amount - a.amount);
+  const total = sum(list), prev = sum(pick(prevKey));
+  const byM = {};
+  list.forEach(t => { const k = t.memo || '–'; const b = (byM[k] = byM[k] || { n: 0, v: 0 }); b.n++; b.v += t.amount; });
+  const top = Object.entries(byM).sort((a, b) => b[1].v - a[1].v).slice(0, 5);
+  const label = scope === 'year' ? `${y}년` : monthLabel(viewMonth);
+  const prevLabel = scope === 'year' ? '작년' : '지난달';
+  form.innerHTML = `<div class="row"><h2>${catIcon(cat)} ${esc(cat)}</h2><span class="muted">${label}</span></div>
+    <div class="big expense">${won(total)}</div>
+    <div class="muted">${list.length}건${prev ? ` · ${prevLabel} ${won(prev)} ${total > prev ? `<b class="expense">▲${shortWon(total - prev)}</b>` : total < prev ? `<b class="income">▼${shortWon(prev - total)}</b>` : '='}` : ''}</div>
+    ${top.length > 1 ? `<h3>가맹점</h3><table class="mini">${top.map(([m, b]) => `<tr><td>${esc(m)}${b.n > 1 ? ` <span class="muted">×${b.n}</span>` : ''}</td><td>${won(b.v)}</td></tr>`).join('')}</table>` : ''}
+    <h3>내역</h3>
+    ${list.length ? `<ul class="list">${list.slice(0, 60).map(t => `<li data-cat-tx="${t.id}"><div class="li-main"><div><div class="title">${esc(t.memo || cat)}${t.sum ? ' <span class="pill">월합계</span>' : ''}</div><div class="sub">${Number(t.date.slice(5, 7))}/${Number(t.date.slice(8))}${acctOf(t) ? ` · ${esc(acctOf(t).name)}` : ''}</div></div></div><div class="amount expense">−${won(t.amount)}</div></li>`).join('')}</ul>${list.length > 60 ? `<div class="hint">최근 60건만 표시</div>` : ''}` : '<div class="empty">기록 없음</div>'}
+    <div class="actions"><button type="button" class="btn ghost" data-act="close">닫기</button></div>`;
+  form.onsubmit = e => e.preventDefault();
+  form.onclick = e => {
+    if (e.target.closest('[data-act=close]')) { sheet.close(); return; }
+    const li = e.target.closest('[data-cat-tx]'); if (!li) return;
+    const t = state.tx.find(x => x.id === li.dataset.catTx); if (!t) return;
+    form.onclick = null; sheet.close();
+    setTimeout(() => openTxSheet(t), 50); // 내역 수정 화면으로
+  };
+  sheet.addEventListener('close', () => { form.onclick = null; }, { once: true });
+  sheet.showModal();
+}
 function openClassifySheet() {
   const draw = () => {
     const list = uncategorized().sort((a, b) => b.date.localeCompare(a.date));
@@ -1849,7 +1879,7 @@ function renderYearHome() {
       ${cats.length ? `
         <div class="donut-wrap">${donut(cats, ys.varExpense)}<div class="donut-center"><span>변동지출</span><b>${shortWon(ys.varExpense)}원</b></div></div>
         <ul class="list cats">${cats.map(([c, v]) => `
-          <li><div class="li-main">${catIcon(c)}<div><div class="title">${esc(c)}</div><div class="sub">${pct(v, ys.varExpense)}%</div></div></div>
+          <li data-cat-detail="${esc(c)}" data-scope="year"><div class="li-main">${catIcon(c)}<div><div class="title">${esc(c)}</div><div class="sub">${pct(v, ys.varExpense)}%</div></div></div>
           <div class="amount">${won(v)}</div></li>`).join('')}</ul>` : `<div class="empty">기록 없음</div>`}
     </section>`;
 }
@@ -1924,9 +1954,10 @@ $('#monthLabel').onclick = () => openPicker();
 $('#fab').onclick = () => openTxSheet();
 
 view.addEventListener('click', e => {
-  const el = e.target.closest('[data-src],[data-acct],[data-add-acct],[data-ilog],[data-ilog-clear],[data-fund],[data-add-fund],[data-recur],[data-inst-end],[data-budget],[data-classify],[data-del-cat],#addCatBtn,[data-asset],[data-add-asset],[data-month-sum],[data-bill-import],[data-bill-paid],[data-bill],[data-add-bill],[data-bill-migrate],[data-open-month],[data-import-fixed],[data-clear-ended],[data-sms],[data-day],[data-clear-day],[data-edit-tx],[data-edit-fixed],[data-add-fixed],[data-edit-goal],[data-add-goal],[data-goto],#exportBtn,#importBtn,#resetBtn,#updateBtn,#loginBtn,#logoutBtn,#syncBtn,#dropBtn,#coachBtn,[data-copy]');
+  const el = e.target.closest('[data-cat-detail],[data-src],[data-acct],[data-add-acct],[data-ilog],[data-ilog-clear],[data-fund],[data-add-fund],[data-recur],[data-inst-end],[data-budget],[data-classify],[data-del-cat],#addCatBtn,[data-asset],[data-add-asset],[data-month-sum],[data-bill-import],[data-bill-paid],[data-bill],[data-add-bill],[data-bill-migrate],[data-open-month],[data-import-fixed],[data-clear-ended],[data-sms],[data-day],[data-clear-day],[data-edit-tx],[data-edit-fixed],[data-add-fixed],[data-edit-goal],[data-add-goal],[data-goto],#exportBtn,#importBtn,#resetBtn,#updateBtn,#loginBtn,#logoutBtn,#syncBtn,#dropBtn,#coachBtn,[data-copy]');
   if (!el) return;
-  if (el.dataset.src) { txSrc = txSrc === el.dataset.src ? '' : el.dataset.src; render(); }
+  if (el.dataset.catDetail) openCatSheet(el.dataset.catDetail, el.dataset.scope);
+  else if (el.dataset.src) { txSrc = txSrc === el.dataset.src ? '' : el.dataset.src; render(); }
   else if (el.dataset.acct) openAcctSheet(accounts().find(a => a.id === el.dataset.acct));
   else if ('addAcct' in el.dataset) openAcctSheet();
   else if (el.dataset.ilog) { const x = (state.settings.ingestLog || [])[Number(el.dataset.ilog)]; if (x) openSmsSheet(x.text); }

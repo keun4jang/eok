@@ -397,3 +397,6 @@ details.hint summary { cursor: pointer; }
 .src-chips { margin: 0 0 10px; }
 .src-chips .chip small { color: var(--muted); font-size: 11px; margin-left: 2px; }
 .chip.on { background: color-mix(in srgb, var(--c) 30%, transparent); border-color: var(--c); font-weight: 600; }
+
+[data-cat-detail] { cursor: pointer; }
+[data-cat-detail]:active, [data-cat-tx]:active { opacity: .7; }
