@@ -5,7 +5,7 @@
 const APP_VERSION = window.EOK_VERSION?.n ? `v${window.EOK_VERSION.n}` : 'dev';
 const STORAGE_KEY = 'moneyplan.v1'; // 앱 이름이 '억'으로 바뀌었지만 기존 데이터 호환을 위해 키 유지
 const BASE_EXPENSE = ['식비', '배달', '카페/간식', '술·유흥', '교통', '자동차', '쇼핑', '생활용품', '미용', '주거/관리비', '통신', '구독', '보험', '문화/여가', '여행', '운동', '의료', '교육', '반려동물', '가족·커플', '경조사', '세금·수수료', '대출이자', '사업', '기타']; // 사업: 사업용 지출을 개인 계좌로 낸 것(변동지출 예산에서 제외)
-const BASE_INCOME = ['급여', '부수입', '사업', '상여', '이자/배당', '용돈', '기타'];
+const BASE_INCOME = ['수익', '부수입', '사업', '상여', '이자/배당', '용돈', '기타'];
 // 사용자 카테고리(settings.customCats)를 기본 목록 뒤('기타' 앞)에 붙인다. 배열은 그 자리에서 갱신(다른 곳이 같은 배열을 참조)
 const EXPENSE_CATS = [...BASE_EXPENSE];
 const SAVING_CATS = ['주식·ETF', '적금·청약', '연금', '코인', '기타투자'];
@@ -18,7 +18,7 @@ const CAT_COLORS = {
   '식비': '#C8A96A', '카페/간식': '#B88A6A', '교통': '#7F93B5', '쇼핑': '#A88BA8', '생활용품': '#8FB8A0',
   '주거/관리비': '#6F8FA3', '통신': '#9AA6B8', '구독': '#C48E9A', '보험': '#8C9C7A', '문화/여가': '#D1B98A',
   '의료': '#7FA8A4', '교육': '#9C8FC4', '가족·커플': '#C79BA0', '배달': '#D1A06A', '술·유흥': '#B07A8C', '자동차': '#7A8FA6', '미용': '#C9A0B4', '여행': '#6FA3C0', '운동': '#8FB88F', '반려동물': '#B8A07A', '세금·수수료': '#9A9A8A', '주식·ETF': '#8FA8C8', '적금·청약': '#A3C2AE', '연금': '#BFAE8E', '코인': '#C8A96A', '기타투자': '#9AA6B8', '경조사': '#C9876F', '대출이자': '#A0705F', '사업': '#6F8F86', '기타': '#8A8F98',
-  '급여': '#8FB8A0', '부수입': '#A3C2AE', '상여': '#C8A96A', '이자/배당': '#7FA8A4', '용돈': '#B5A3C4',
+  '수익': '#8FB8A0', '부수입': '#A3C2AE', '상여': '#C8A96A', '이자/배당': '#7FA8A4', '용돈': '#B5A3C4',
 };
 const PALETTE = ['#C8A96A', '#8FB8A0', '#7F93B5', '#A88BA8', '#C9876F', '#6FA3A0', '#C48E9A', '#9DA36F', '#B5A3C4', '#BFAE8E'];
 const catColor = c => CAT_COLORS[c] || PALETTE[[...String(c)].reduce((a, ch) => a + ch.charCodeAt(0), 0) % PALETTE.length];
@@ -33,7 +33,7 @@ const CAT_EMOJI = {
   '식비': '🍚', '배달': '🛵', '카페/간식': '☕', '술·유흥': '🍺', '교통': '🚇', '자동차': '🚗', '쇼핑': '🛍️', '생활용품': '🧴',
   '미용': '💇', '주거/관리비': '🏠', '통신': '📱', '구독': '🔁', '보험': '🛡️', '문화/여가': '🎬', '여행': '✈️', '운동': '🏃',
   '의료': '🏥', '교육': '📚', '반려동물': '🐾', '가족·커플': '💑', '경조사': '💐', '세금·수수료': '🧾', '대출이자': '🏦', '사업': '💼', '기타': '📦',
-  '급여': '💵', '부수입': '💰', '상여': '🎁', '이자/배당': '💹', '용돈': '🤲',
+  '수익': '💵', '부수입': '💰', '상여': '🎁', '이자/배당': '💹', '용돈': '🤲',
   '주식·ETF': '📈', '적금·청약': '🐷', '연금': '🌱', '코인': '🪙', '기타투자': '💎',
 };
 const catIcon = (c, type) => `<span class="cat-ic" style="--c:${catColor(c)}">${CAT_EMOJI[c] || esc(String(c).charAt(0))}</span>`;
@@ -953,7 +953,7 @@ function openTxSheet(t) {
 
 function openFixedSheet(f, type, cat) {
   const isNew = !f;
-  f = f || { type: type || 'expense', name: '', amount: '', category: cat || (type === 'income' ? '급여' : type === 'saving' ? '주식·ETF' : '주거/관리비'), day: '' };
+  f = f || { type: type || 'expense', name: '', amount: '', category: cat || (type === 'income' ? '수익' : type === 'saving' ? '주식·ETF' : '주거/관리비'), day: '' };
   openSheet(`<h2>${isNew ? '고정 항목 추가' : '고정 항목 수정'}</h2>
     ${typeSeg3(f.type)}
     <label>이름</label><input name="name" required value="${esc(f.name)}" placeholder="예: 월세, 넷플릭스, 월급" maxlength="30" />
@@ -1345,7 +1345,7 @@ function openMonthSumSheet(initialText = '') {
       const type = /\|\s*수입\s*\||^수입\b/.test(ln) ? 'income' : /\|\s*(투자|저축)\s*\||^(투자|저축)\b/.test(ln) ? 'saving' : 'expense';
       const cats = type === 'income' ? INCOME_CATS : type === 'saving' ? SAVING_CATS : EXPENSE_CATS;
       let cat = cats.find(c => ln.includes(c));
-      if (!cat) cat = type === 'income' ? '기타' : type === 'saving' ? savingCat(p.name) : (/주유|기름|지하철|버스|택시|교통|후불/.test(p.name) ? '교통' : SmsParser.guessCategory('expense', p.name, p.name));
+      if (!cat) cat = type === 'income' ? (/급여|월급/.test(ln) ? '수익' : '기타') : type === 'saving' ? savingCat(p.name) : (/주유|기름|지하철|버스|택시|교통|후불/.test(p.name) ? '교통' : SmsParser.guessCategory('expense', p.name, p.name));
       rows.push({ name: p.name, m, amount, cat, type });
     }
     rows.sort((a, b) => a.m.localeCompare(b.m) || a.name.localeCompare(b.name));
@@ -1424,7 +1424,16 @@ function applyBalance(it) {
   if (!a) return false;
   a.balance = it.balance; a.updated = it.date || todayStr(); return true;
 }
-function assetsDaily() { const c = autoAccrue() | syncLinkedGoals() | snapshotDaily() | fixIssuerMemos(); if (c) save(); }
+function assetsDaily() { const c = autoAccrue() | syncLinkedGoals() | snapshotDaily() | fixIssuerMemos() | renameIncomeCat(); if (c) save(); }
+// 사용자 요청: 수입 카테고리 '급여' → '수익'(급여 외 수입도 있어서). 예전 기록·고정 항목·학습값을 옮긴다(동기화로 다른 기기에도 반영)
+function renameIncomeCat() {
+  let changed = false;
+  for (const r of [...state.tx, ...state.fixed]) if (r.type === 'income' && r.category === '급여') { r.category = '수익'; changed = true; }
+  for (const f of state.fixed) if (f.type === 'income' && f.name === '급여') { f.name = '수익'; changed = true; }
+  const mc = state.merchantCats || {};
+  for (const k of Object.keys(mc)) if (mc[k] === '급여') { mc[k] = '수익'; changed = true; }
+  return changed;
+}
 // 예전 해석 오류 보정: '삼성7811승인 … 쿠팡' 알림이 가맹점 '삼성'으로 들어간 것을 수집 기록 원문으로 다시 해석
 const ISSUER_ONLY = /^(KB국민|국민|삼성|신한|현대|하나|우리|롯데|농협|기업|씨티|카카오|토스|케이|비씨|BC|NH|IBK)$/;
 function fixIssuerMemos() {
