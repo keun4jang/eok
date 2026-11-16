@@ -677,7 +677,8 @@ function accountCardHtml() {
       <div class="row" style="margin-top:8px"><span class="muted">${st.phase === 'syncing' ? '☁ …' : time ? `☁ ${time}` : '☁'}</span>
       <button class="btn sm ghost" id="syncBtn">↻</button></div>
       <h3>자동 수집</h3>
-      <div id="dropBox">${dropHtml()}</div>`;
+      <div id="dropBox">${dropHtml()}</div>
+      ${ingestLogHtml()}`;
   return `<section class="card" id="accountCard"><h2>계정</h2>${body}${st.error && st.user ? `<div class="hint">⚠ ${esc(st.error)}</div>` : ''}</section>`;
 }
 let dropShown = null; // 자동 수집 설정값(한 번 불러오면 카드 다시 그려도 유지)
@@ -706,19 +707,38 @@ function refreshAccount() {
 // 자동 수집은 '모든 앱'에서 올 수 있어, 금융기관 표시가 있는 알림만 받는다(친구 카톡 "3만원 입금했어" 같은 것 제외)
 const FIN_MARK = /카드|은행|뱅크|BANK|페이|Pay|증권|Web발신|잔액|누적|일시불|할부|체크|\b(KB|NH|IBK|SC|BC|KEB|SH)\b|토스|카카오뱅크|케이뱅크|우체국|새마을|신협|농협|수협/i;
 function ingest(texts) {
-  const fin = texts.filter(t => FIN_MARK.test(t));
-  const items = buildSmsItems(fin.join('\n\n'));
-  let added = 0, removed = 0;
-  const balUp = items.map(applyBalance).filter(Boolean).length; if (balUp) syncLinkedGoals();
-  for (const it of items) {
-    if (!it.on) continue;
-    if (it.type === 'cancel') { if (it.cancelTarget) { state.tx = state.tx.filter(t => t.id !== it.cancelTarget); removed++; } continue; }
-    if (it.billId && recordBill(it)) { added++; continue; }
-    state.tx.push({ id: uid(), type: it.type, amount: it.amount, category: it.category, memo: it.memo.trim(), date: it.date, auto: true, ...(it.fundId ? { fund: it.fundId } : {}) });
-    added++;
+  // 알림 1건씩 해석해 결과를 '수집 기록'에 남긴다(안 들어온 이유를 폰에서 바로 확인하기 위해)
+  let added = 0, removed = 0, balUp = 0, ignored = 0;
+  const log = [];
+  for (const raw of texts) {
+    const text = String(raw || '').trim();
+    if (!FIN_MARK.test(text)) { ignored++; log.push({ at: Date.now(), r: '무시', text: text.slice(0, 40) }); continue; } // 금융 알림 아님: 앞부분만
+    const items = buildSmsItems(text);
+    const res = [];
+    for (const it of items) {
+      if (applyBalance(it)) { balUp++; res.push('잔액'); }
+      if (!it.on) { res.push(it.dup ? '중복' : it.fixedHit ? '고정' : it.type === 'cancel' ? '취소 대상 없음' : '제외'); continue; }
+      if (it.type === 'cancel') { if (it.cancelTarget) { state.tx = state.tx.filter(t => t.id !== it.cancelTarget); removed++; res.push('취소'); } continue; }
+      if (it.billId && recordBill(it)) { added++; res.push('공과금'); continue; }
+      state.tx.push({ id: uid(), type: it.type, amount: it.amount, category: it.category, memo: it.memo.trim(), date: it.date, auto: true, ...(it.fundId ? { fund: it.fundId } : {}) });
+      added++; res.push('등록');
+    }
+    log.push({ at: Date.now(), r: res.length ? [...new Set(res)].join('·') : '해석 실패', text: text.slice(0, 300) });
   }
-  if (added || removed || balUp) { save(); if (!sheet.open) render(); }
-  toast(`자동 ${added}건 등록${removed ? ` · 취소 ${removed}` : ''}${texts.length - fin.length ? ` · 무시 ${texts.length - fin.length}` : ''}`);
+  if (balUp) syncLinkedGoals();
+  state.settings.ingestLog = [...log.reverse(), ...(state.settings.ingestLog || [])].slice(0, 40);
+  save(); if (!sheet.open) render();
+  toast(`자동 ${added}건 등록${removed ? ` · 취소 ${removed}` : ''}${ignored ? ` · 무시 ${ignored}` : ''}`);
+}
+function ingestLogHtml() {
+  const list = state.settings.ingestLog || [];
+  if (!list.length) return '<p class="hint">📥 기록 없음</p>';
+  const bad = list.filter(x => /실패|제외|대상 없음/.test(x.r)).length;
+  const t = ms => { const d = new Date(ms); return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
+  return `<details class="ilog"><summary>📥 기록 ${list.length}${bad ? ` · <b class="expense">실패 ${bad}</b>` : ''}</summary>
+    <ul class="list">${list.map((x, i) => `<li><div><div class="sub">${t(x.at)} <span class="pill ${x.r.includes('등록') || x.r === '공과금' || x.r === '취소' ? 'ok' : /실패|제외|대상 없음/.test(x.r) ? 'bad' : ''}">${esc(x.r)}</span></div>
+      <div class="ilog-text">${esc(x.text)}</div></div>${x.r !== '무시' ? `<button class="link-btn" data-ilog="${i}">✉</button>` : ''}</li>`).join('')}</ul>
+    <button class="link-btn" data-ilog-clear>지우기</button></details>`;
 }
 window.EokApp = { getState: () => state, adopt, refreshAccount, ingest };
 
@@ -1805,9 +1825,11 @@ $('#monthLabel').onclick = () => openPicker();
 $('#fab').onclick = () => openTxSheet();
 
 view.addEventListener('click', e => {
-  const el = e.target.closest('[data-fund],[data-add-fund],[data-recur],[data-inst-end],[data-budget],[data-classify],[data-del-cat],#addCatBtn,[data-asset],[data-add-asset],[data-month-sum],[data-bill-import],[data-bill-paid],[data-bill],[data-add-bill],[data-bill-migrate],[data-open-month],[data-import-fixed],[data-clear-ended],[data-sms],[data-day],[data-clear-day],[data-edit-tx],[data-edit-fixed],[data-add-fixed],[data-edit-goal],[data-add-goal],[data-goto],#exportBtn,#importBtn,#resetBtn,#updateBtn,#loginBtn,#logoutBtn,#syncBtn,#dropBtn,#coachBtn,[data-copy]');
+  const el = e.target.closest('[data-ilog],[data-ilog-clear],[data-fund],[data-add-fund],[data-recur],[data-inst-end],[data-budget],[data-classify],[data-del-cat],#addCatBtn,[data-asset],[data-add-asset],[data-month-sum],[data-bill-import],[data-bill-paid],[data-bill],[data-add-bill],[data-bill-migrate],[data-open-month],[data-import-fixed],[data-clear-ended],[data-sms],[data-day],[data-clear-day],[data-edit-tx],[data-edit-fixed],[data-add-fixed],[data-edit-goal],[data-add-goal],[data-goto],#exportBtn,#importBtn,#resetBtn,#updateBtn,#loginBtn,#logoutBtn,#syncBtn,#dropBtn,#coachBtn,[data-copy]');
   if (!el) return;
-  if (el.dataset.fund) openFundSheet(state.funds.find(f => f.id === el.dataset.fund));
+  if (el.dataset.ilog) { const x = (state.settings.ingestLog || [])[Number(el.dataset.ilog)]; if (x) openSmsSheet(x.text); }
+  else if ('ilogClear' in el.dataset) { state.settings.ingestLog = []; save(); render(); }
+  else if (el.dataset.fund) openFundSheet(state.funds.find(f => f.id === el.dataset.fund));
   else if ('addFund' in el.dataset) openFundSheet();
   else if ('recur' in el.dataset) openRecurSheet();
   else if ('instEnd' in el.dataset) {
