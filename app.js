@@ -274,6 +274,7 @@ function renderHome() {
       </div>
     </section>
 
+    ${eokHtml()}
     ${reviewHtml()}
     ${budgetHtml()}
     ${uncategorized().length ? `<button class="sms-cta" data-classify><span class="cat-ic" style="--c:var(--gold)">❓</span><span><b>분류 필요 ${uncategorized().length}</b></span><span class="chev">›</span></button>` : ''}
@@ -315,6 +316,59 @@ function donut(cats, total) {
     return el;
   }).join('');
   return `<svg class="donut" viewBox="0 0 140 140" aria-hidden="true"><circle r="${R}" cx="70" cy="70" fill="none" stroke="var(--line)" stroke-width="14"/>${arcs}</svg>`;
+}
+
+/* ===================== 억까지 (홈 카드) ===================== */
+// 앱 컨셉: 1억 만들기. 지금 어디쯤인지·이 속도면 언제인지·무엇을 하면 빨라지는지 한 장에 보여 준다.
+// 수익률은 0%로 계산(사용자 결정: 주식은 떨어질 수도 있으니 보수적으로).
+const bizNet = m => { // 개인 계좌로 오간 사업 돈: '사업' 수입 − '사업' 지출
+  const txs = state.tx.filter(t => t.date.startsWith(m) && t.category === '사업' && !isBiz(t));
+  return sum(txs.filter(t => t.type === 'income')) - sum(txs.filter(t => t.type === 'expense'));
+};
+function eokInfo() {
+  const g = state.goals.find(x => x.target === 1e8) || state.goals[0];
+  const target = g?.target || 1e8;
+  const cur = g ? (Number(g.saved) || 0) : ((state.assets || []).length ? assetTotals().fin : 0);
+  const now = ym(new Date());
+  const pace = sum(activeFixed(now).filter(f => f.type === 'saving')); // 매달 자동으로 모으는 돈
+  const biz = bizNet(now);
+  const months = pace > 0 ? monthsToReach(target, cur, pace, 0) : Infinity;
+  const left = g?.deadline ? Math.max(1, monthDiff(now, g.deadline)) : 0;
+  const need = left ? requiredMonthly(target, cur, left, 0) : 0;
+  const steps = [0.1, 0.3, 0.5, 0.7, 1].map(r => Math.round(target * r));
+  const next = steps.find(v => v > cur) || target;
+  const faster = pace > 0 && isFinite(months) ? months - monthsToReach(target, cur, pace + 100000, 0) : 0;
+  return { g, target, cur, now, pace, biz, months, need, steps, next, faster, deadline: g?.deadline || '' };
+}
+const etaLabel = (now, months) => !isFinite(months) || months > 600 ? '–' : months <= 0 ? '달성 🎉' : monthLabel(shiftMonth(now, months));
+function eokHtml() {
+  if (viewMode !== 'month' || viewMonth !== ym(new Date())) return '';
+  const e = eokInfo();
+  if (!e.g && !(state.assets || []).length) return '';
+  const p = Math.min(100, pct(e.cur, e.target));
+  const short = e.need > e.pace ? e.need - e.pace : 0;
+  return `<section class="card eok-card" data-goto="goals">
+    <div class="row"><h2>🏁 억까지</h2><span class="muted">${e.cur >= e.target ? '달성 🎉' : `남은 ${shortWon(e.target - e.cur)}원`}</span></div>
+    <div class="row"><span class="big">${p}%</span><span class="muted">${shortWon(e.cur)}원 / ${shortWon(e.target)}원</span></div>
+    <div class="eok-bar"><i style="width:${p}%"></i>${e.steps.slice(0, -1).map(v => `<b class="${e.cur >= v ? 'on' : ''}" style="left:${pct(v, e.target)}%"></b>`).join('')}</div>
+    <div class="eok-steps">${e.steps.map(v => `<span class="${e.cur >= v ? 'on' : v === e.next ? 'next' : ''}">${e.cur >= v ? '✓ ' : ''}${shortWon(v)}</span>`).join('')}</div>
+    <table class="mini">
+      ${e.cur < e.next ? `<tr><td>🎯 다음 ${shortWon(e.next)}원</td><td>${shortWon(e.next - e.cur)}원 남음</td></tr>` : ''}
+      <tr><td>💪 매달 모으는 돈</td><td>${won(e.pace)}</td></tr>
+      ${e.biz ? `<tr><td>💼 이번 달 사업</td><td class="${e.biz < 0 ? 'expense' : 'income'}">${e.biz > 0 ? '+' : '−'}${won(Math.abs(e.biz))}</td></tr>` : ''}
+      <tr><td>📅 이 속도면</td><td>${etaLabel(e.now, e.months)}</td></tr>
+      ${e.deadline && e.cur < e.target ? `<tr><td>⏰ ${e.deadline.replace('-', '.')}까지 하려면</td><td>월 ${shortWon(e.need)}원${short ? ` <b class="expense">(+${shortWon(short)})</b>` : ' ✓'}</td></tr>` : ''}
+      ${e.faster >= 1 ? `<tr><td>⚡ 월 10만 더 모으면</td><td class="income">${e.faster}개월 빨리</td></tr>` : ''}
+    </table>
+    <details class="hint" onclick="event.stopPropagation()"><summary>계산?</summary>수익률 0%로 보수적으로 계산. 매달 모으는 돈 = 고정 탭의 투자·적금 합계. 사업 = '사업' 카테고리 수입 − 지출. 목표 금액·기한은 목표 탭에서.</details>
+  </section>`;
+}
+// 어떤 지출을 매달 줄여 모으면 억이 얼마나 빨라지는지
+function eokFasterHint(amount) {
+  const e = eokInfo();
+  if (!(e.pace > 0) || !isFinite(e.months) || e.cur >= e.target || !(amount > 0)) return '';
+  const d = e.months - monthsToReach(e.target, e.cur, e.pace + amount, 0);
+  return d >= 1 ? `<div class="hint">🏁 이만큼 매달 모으면 억이 ${d}개월 빨라짐 · 절반만 줄여도 ${Math.max(0, e.months - monthsToReach(e.target, e.cur, e.pace + amount / 2, 0))}개월</div>` : '';
 }
 
 function renderGoalSummary() {
@@ -1524,6 +1578,7 @@ function openCatSheet(cat, scope = 'month') {
   form.innerHTML = `<div class="row"><h2>${catIcon(cat)} ${esc(cat)}</h2><span class="muted">${label}</span></div>
     <div class="big expense">${won(total)}</div>
     <div class="muted">${list.length}건${prev ? ` · ${prevLabel} ${won(prev)} ${total > prev ? `<b class="expense">▲${shortWon(total - prev)}</b>` : total < prev ? `<b class="income">▼${shortWon(prev - total)}</b>` : '='}` : ''}</div>
+    ${scope === 'month' ? eokFasterHint(total) : ''}
     ${top.length > 1 ? `<h3>가맹점</h3><table class="mini">${top.map(([m, b]) => `<tr><td>${esc(m)}${b.n > 1 ? ` <span class="muted">×${b.n}</span>` : ''}</td><td>${won(b.v)}</td></tr>`).join('')}</table>` : ''}
     <h3>내역</h3>
     ${list.length ? `<ul class="list">${list.slice(0, 60).map(t => `<li data-cat-tx="${t.id}"><div class="li-main"><div><div class="title">${esc(t.memo || cat)}${t.sum ? ' <span class="pill">월합계</span>' : ''}</div><div class="sub">${Number(t.date.slice(5, 7))}/${Number(t.date.slice(8))}${acctOf(t) ? ` · ${esc(acctOf(t).name)}` : ''}</div></div></div><div class="amount expense">−${won(t.amount)}</div></li>`).join('')}</ul>${list.length > 60 ? `<div class="hint">최근 60건만 표시</div>` : ''}` : '<div class="empty">기록 없음</div>'}

@@ -441,3 +441,14 @@ details.hint summary { cursor: pointer; }
 .theme-seg { min-width: 220px; }
 .theme-seg button { border: 0; background: none; padding: 7px 4px; border-radius: 10px; cursor: pointer; font: inherit; font-weight: 600; font-size: 13px; color: var(--muted); white-space: nowrap; }
 .theme-seg button.on { background: var(--seg-on); color: var(--text); box-shadow: 0 1px 4px rgba(0,0,0,.12); }
+
+/* 억까지 카드 */
+.eok-card { cursor: pointer; border-color: color-mix(in srgb, var(--gold) 35%, var(--line)); }
+.eok-card .big { color: var(--gold); }
+.eok-bar { position: relative; height: 10px; border-radius: 99px; background: var(--surface-2); margin: 8px 0 6px; }
+.eok-bar > i { display: block; height: 100%; border-radius: 99px; background: linear-gradient(90deg, var(--gold), var(--gold-hi)); min-width: 4px; }
+.eok-bar > b { position: absolute; top: -2px; width: 2px; height: 14px; margin-left: -1px; border-radius: 2px; background: var(--line); }
+.eok-bar > b.on { background: var(--surface); opacity: .7; }
+.eok-steps { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); margin-bottom: 8px; font-variant-numeric: tabular-nums; }
+.eok-steps .on { color: var(--income); }
+.eok-steps .next { color: var(--gold); font-weight: 700; }
