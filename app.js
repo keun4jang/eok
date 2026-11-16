@@ -1487,13 +1487,20 @@ function openClassifySheet() {
       ${list.length ? list.slice(0, 30).map(t => `
         <div class="sms-item" data-cls="${t.id}">
           <div class="row"><div><div class="title">${esc(t.memo || '–')}</div><div class="sub">${Number(t.date.slice(5, 7))}/${Number(t.date.slice(8))}</div></div><b class="expense">−${won(t.amount)}</b></div>
-          <div class="chips">${EXPENSE_CATS.filter(c => c !== '기타').map(c => `<button type="button" class="chip" data-pick-cat="${esc(c)}" style="--c:${catColor(c)}">${esc(c)}</button>`).join('')}</div>
+          <div class="chips">${EXPENSE_CATS.filter(c => c !== '기타').map(c => `<button type="button" class="chip" data-pick-cat="${esc(c)}" style="--c:${catColor(c)}">${esc(c)}</button>`).join('')}<button type="button" class="chip" data-del-cls style="--c:var(--expense)">🗑 삭제</button></div>
         </div>`).join('') : '<div class="empty">✓</div>'}
       <div class="actions"><button type="button" class="btn ghost" data-act="close">닫기</button></div>`;
   };
   form.onsubmit = e => e.preventDefault();
   form.onclick = e => {
     if (e.target.closest('[data-act=close]')) { sheet.close(); return; }
+    const d = e.target.closest('[data-del-cls]');
+    if (d) { // 잘못 들어온 내역(중복·결제 아님 등)을 분류 화면에서 바로 삭제
+      const t = state.tx.find(x => x.id === d.closest('[data-cls]').dataset.cls); if (!t) return;
+      if (!confirm(`${t.memo || '내역'} ${won(t.amount)} 삭제할까요?`)) return;
+      state.tx = state.tx.filter(x => x.id !== t.id);
+      save(); toast('삭제'); draw(); return;
+    }
     const b = e.target.closest('[data-pick-cat]'); if (!b) return;
     const t = state.tx.find(x => x.id === b.closest('[data-cls]').dataset.cls); if (!t) return;
     const cat = b.dataset.pickCat;
