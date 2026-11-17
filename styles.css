@@ -543,3 +543,49 @@ details.hint summary { cursor: pointer; }
 .card { box-shadow: none; }
 .card h2 { font-size: 16px; }
 .topbar h1 { color: var(--text); }
+
+/* ---------- 움직임 (2026-11-17): 탭·달 전환, 금액 세기, 막대 차오름, 누름 반응, 스크롤 ---------- */
+@keyframes navL { from { opacity: 0; transform: translateX(28px); } }
+@keyframes navR { from { opacity: 0; transform: translateX(-28px); } }
+@keyframes navIn { from { opacity: 0; transform: translateY(10px); } }
+@keyframes grow { from { transform: scaleX(0); } }
+@keyframes fadeDown { from { opacity: 0; transform: translateY(-4px); } }
+#view.nav-l { animation: navL .28s cubic-bezier(.2,.8,.2,1); }
+#view.nav-r { animation: navR .28s cubic-bezier(.2,.8,.2,1); }
+#view.nav-in { animation: navIn .32s cubic-bezier(.2,.8,.2,1); }
+/* 막대들은 왼쪽부터 차오름: 맨 위 수입 막대는 칸마다 조금씩 늦게 */
+#view[class*="nav-"] .hero-stack i { transform-origin: left; animation: grow .6s cubic-bezier(.2,.8,.2,1) both; }
+#view[class*="nav-"] .hero-stack i:nth-child(2) { animation-delay: .08s; }
+#view[class*="nav-"] .hero-stack i:nth-child(3) { animation-delay: .16s; }
+#view[class*="nav-"] .bar > i, #view[class*="nav-"] .eok-bar > i { transform-origin: left; animation: grow .7s .1s cubic-bezier(.2,.8,.2,1) both; }
+/* 스크롤로 보이는 카드 */
+section.reveal { opacity: 0; transform: translateY(16px); transition: opacity .4s ease, transform .4s cubic-bezier(.2,.8,.2,1); }
+section.reveal.shown { opacity: 1; transform: none; }
+/* 누름 반응 */
+button, .sms-cta, [data-goto], [data-budget], li[data-edit-tx], li[data-edit-fixed], li[data-cat-detail], li[data-fund], .guide-item summary { transition: transform .12s ease, background-color .15s ease; }
+button:active, .sms-cta:active, section[data-goto]:active, section[data-budget]:active, li[data-edit-tx]:active, li[data-edit-fixed]:active, li[data-cat-detail]:active, li[data-fund]:active { transform: scale(.97); }
+.tabbar button.active svg { animation: tabPop .3s cubic-bezier(.3,1.6,.5,1); }
+@keyframes tabPop { 40% { transform: translateY(-3px) scale(1.12); } }
+/* 펼치기 */
+details[open] > :not(summary) { animation: fadeDown .2s ease-out; }
+/* 상단 바: 스크롤하면 경계선 */
+.topbar { transition: box-shadow .2s ease; }
+.topbar.scrolled { box-shadow: 0 1px 0 var(--line); }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+  section.reveal { opacity: 1; transform: none; }
+}
+
+/* ---------- 줄바꿈·줄 간격 (2026-11-17) ---------- */
+/* 한글은 낱말 중간에서 끊지 않음 */
+body { word-break: keep-all; overflow-wrap: anywhere; }
+/* 작은 글자 줄 간격 통일: 본문 1.5, 보조 글자 1.45 */
+.muted, .hint, .sub, small, .list .sub, .guide-item .sub, .how { line-height: 1.45; }
+.list .sub + .sub { margin-top: 1px; }
+.muted + .muted { margin-top: 2px; }
+.hero-split small { display: block; line-height: 1.45; }
+.hero-split small + small { margin-top: 0; }
+.guide-item .how { margin-top: 6px; }
+.guide-btns { margin-top: 2px; }
+table.mini td { line-height: 1.45; vertical-align: top; }
+.card h2 { line-height: 1.3; }

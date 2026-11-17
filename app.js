@@ -243,13 +243,46 @@ function goalPlan(g, avg) {
 const $ = s => document.querySelector(s);
 const view = $('#view');
 
+// 화면 전환 애니메이션: 탭·달을 바꿀 때만(저장할 때마다 다시 그리는 경우엔 움직이지 않음)
+const TAB_ORDER = ['home', 'tx', 'fixed', 'goals', 'insights'];
+const reduceMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
+let lastNav = null;
+function navAnim() {
+  const key = `${currentTab}|${viewMode}|${viewMonth}`, prev = lastNav;
+  lastNav = { key, tab: currentTab, month: viewMonth };
+  if (!prev) return 'nav-in';
+  if (prev.key === key) return '';
+  if (prev.tab !== currentTab) return TAB_ORDER.indexOf(currentTab) > TAB_ORDER.indexOf(prev.tab) ? 'nav-l' : 'nav-r';
+  return viewMonth > prev.month ? 'nav-l' : viewMonth < prev.month ? 'nav-r' : 'nav-in';
+}
+// 맨 위 금액: 0에서 올라가며 세기
+function countUp(el) {
+  const to = Number(el.dataset.v); if (!isFinite(to) || !to) return;
+  const t0 = performance.now(), dur = 700;
+  const step = t => { const p = Math.min(1, (t - t0) / dur), e = 1 - Math.pow(1 - p, 3);
+    el.textContent = won(to * e); if (p < 1) requestAnimationFrame(step); };
+  requestAnimationFrame(step);
+}
+// 스크롤: 화면 아래에 있던 카드는 보일 때 한 번 떠오름
+const revealIO = 'IntersectionObserver' in window ? new IntersectionObserver(es => es.forEach(x => {
+  if (x.isIntersecting) { x.target.classList.add('shown'); revealIO.unobserve(x.target); } }), { rootMargin: '0px 0px -8% 0px' }) : null;
+function animateView(cls) {
+  if (!cls || reduceMotion()) return;
+  view.classList.remove('nav-in', 'nav-l', 'nav-r'); void view.offsetWidth; view.classList.add(cls);
+  const amt = view.querySelector('.hero-amount[data-v]'); if (amt) countUp(amt);
+  if (revealIO) view.querySelectorAll(':scope > section').forEach(s => {
+    if (s.getBoundingClientRect().top > innerHeight) { s.classList.add('reveal'); revealIO.observe(s); } });
+}
+
 function render() {
+  const anim = navAnim();
   document.querySelectorAll('.tabbar button').forEach(b => b.classList.toggle('active', b.dataset.tab === currentTab));
   $('#monthLabel').textContent = viewMode === 'year' ? `${viewMonth.slice(0, 4)}년` : monthLabel(viewMonth);
   $('#monthPicker').style.visibility = (currentTab === 'home' || currentTab === 'tx') ? 'visible' : 'hidden';
   $('#fab').style.display = (currentTab === 'home' || currentTab === 'tx') ? '' : 'none';
   ({ home: renderHome, tx: renderTx, fixed: renderFixed, goals: renderGoals, insights: renderInsights })[currentTab]();
   view.insertAdjacentHTML('beforeend', `<footer class="credit">억 ${APP_VERSION} · 앱 제작자 KEUN</footer>`);
+  animateView(anim);
 }
 
 // 맨 위 카드: 수입 하나를 막대 하나로 — 🔁 고정 · 🛒 생활 · 📈 투자(+적립) · 남음. 같은 숫자를 두 번 쓰지 않음
@@ -261,14 +294,14 @@ function heroHtml(label, st) {
   const seg = (name, v) => v / base >= 0.2 ? `${name} ${P(v)}` : v / base >= 0.1 ? P(v) : ''; // 칸이 좁으면 이름 생략
   return `<section class="hero">
     <div class="hero-label">${label}</div>
-    <div class="hero-amount ${st.left < 0 ? 'neg' : ''}">${won(st.left)}</div>
+    <div class="hero-amount ${st.left < 0 ? 'neg' : ''}" data-v="${Math.round(st.left)}">${won(st.left)}</div>
     <div class="hero-stack">
       <i class="a-fix" style="width:${w(st.fixedExpense || 0)}%">${seg('고정', st.fixedExpense || 0)}</i><i class="a-liv" style="width:${w(st.varExpense || 0)}%">${seg('생활', st.varExpense || 0)}</i><i class="a-sav" style="width:${w(sav)}%">${seg('저축', sav)}</i>
       ${inc > 0 ? '<b class="half" title="억 원칙 50%"></b>' : ''}
     </div>
     <div class="hero-split">
       <div><span>💵 수입</span><b class="income">+${shortWon(inc)}</b></div>
-      <div><span>💸 지출 ${P(st.expense || 0)}</span><b class="expense">−${shortWon(st.expense || 0)}</b><small><i class="dot a-fix"></i>고정 ${shortWon(st.fixedExpense || 0)} <i class="dot a-liv"></i>생활 ${shortWon(st.varExpense || 0)}</small></div>
+      <div><span>💸 지출 ${P(st.expense || 0)}</span><b class="expense">−${shortWon(st.expense || 0)}</b><small><i class="dot a-fix"></i>고정 ${shortWon(st.fixedExpense || 0)}</small><small><i class="dot a-liv"></i>생활 ${shortWon(st.varExpense || 0)}</small></div>
       <div><span>📈 저축·투자 ${P(sav)}</span><b>${shortWon(sav)}</b>${st.reserve ? `<small>🫙 적립 ${shortWon(st.reserve)}</small>` : ''}</div>
     </div>
   </section>`;
@@ -488,7 +521,8 @@ function guideRow(it) {
   return `<details class="guide-item p${Math.min(it.pri, 4)}">
     <summary><b>${it.icon} ${esc(it.title)}</b><span class="gi-r">${g >= 1 ? `<span class="pill ok">🏁 ${g}개월 빨리</span>` : ''}${amt ? `<span class="${it.id === 'deficit' ? 'expense' : it.boost ? 'income' : 'muted'}">${amt}</span>` : ''}</span></summary>
     <div class="sub">${esc(it.why)} <span class="basis ${it.basis}">${Guide.BASIS[it.basis] || ''}${it.src ? ' ' + it.src : ''}</span></div>
-    <div class="row guide-btns"><span class="how">→ ${esc(it.how)}</span><span>${it.action ? `<button type="button" class="link-btn" data-guide-act="${it.action}">바로가기 ›</button>` : ''}<button type="button" class="link-btn" data-guide-done="${it.id}">✓ 했어요</button></span></div>
+    <div class="how">→ ${esc(it.how)}</div>
+    <div class="row guide-btns"><span></span><span>${it.action ? `<button type="button" class="link-btn" data-guide-act="${it.action}">바로가기 ›</button>` : ''}<button type="button" class="link-btn" data-guide-done="${it.id}">✓ 했어요</button></span></div>
   </details>`;
 }
 function guideHtml(all = false) {
@@ -642,7 +676,8 @@ function renderFixed() {
     <section class="card">
       <div class="muted">🔁 이번 달 고정지출</div>
       <div class="big expense">${won(expTotal)}</div>
-      <div class="muted">${incTotal ? `💵 수입의 ${pct(expTotal, incTotal)}%` : '⚠ 고정 수입 없음'}${inst.length ? ` · 할부 ${shortWon(sum(inst))}` : ''}${billNow ? ` · 공과금 ${shortWon(billNow)}` : ''}</div>
+      <div class="muted">${incTotal ? `💵 수입의 ${pct(expTotal, incTotal)}%` : '⚠ 고정 수입 없음'}</div>
+      ${inst.length || billNow ? `<div class="muted">${[inst.length ? `🧾 할부 ${shortWon(sum(inst))}` : '', billNow ? `⚡ 공과금 ${shortWon(billNow)}` : ''].filter(Boolean).join(' · ')}</div>` : ''}
       ${sav.length || reserve ? `<div class="muted">${[sav.length ? `📈 투자 ${shortWon(sum(sav))}` : '', reserve ? `🫙 적립 ${shortWon(reserve)}` : '', incTotal ? `💰 남는 돈 ${shortWon(incTotal - expTotal - sum(sav) - reserve)}` : ''].filter(Boolean).join(' · ')}</div>` : ''}
       ${endingSoon ? `<div class="muted">다음 달 −${won(endingSoon)} (할부 끝)</div>` : ''}
     </section>
@@ -1881,7 +1916,7 @@ function fundsHtml(now) {
   const item = f => {
     const x = fundInfo(f, now);
     return `<li data-fund="${f.id}"><div class="li-main">${catIcon(f.category || '기타')}<div><div class="title">${esc(f.name)}</div>
-      <div class="sub">${(f.months || []).map(n => n + '월').join('·')} ${shortWon(f.amount)} · 잔액 ${shortWon(x.balance)}${x.due ? ` · ${x.short ? `<b class="expense">${Number(x.due.slice(5))}월 부족 ${shortWon(x.short)}</b>` : `${Number(x.due.slice(5))}월 ✓`}` : ''}</div></div></div>
+      <div class="sub">📅 ${(f.months || []).map(n => n + '월').join('·')} · ${shortWon(f.amount)}</div><div class="sub">잔액 ${shortWon(x.balance)}${x.due ? ` · ${x.short ? `<b class="expense">${Number(x.due.slice(5))}월 부족 ${shortWon(x.short)}</b>` : `${Number(x.due.slice(5))}월 ✓`}` : ''}</div></div></div>
       <div class="amount saving">월 ${shortWon(x.monthly)}</div></li>`;
   };
   return `<section class="card">
@@ -2185,9 +2220,10 @@ function openPicker() {
 document.querySelector('.tabbar').addEventListener('click', e => {
   const b = e.target.closest('button[data-tab]');
   if (!b) return;
+  if (b.dataset.tab === currentTab) { window.scrollTo({ top: 0, behavior: reduceMotion() ? 'auto' : 'smooth' }); return; } // 같은 탭 다시 누르면 맨 위로
   currentTab = b.dataset.tab;
-  render();
   window.scrollTo(0, 0);
+  render();
 });
 $('#prevMonth').onclick = () => { selectedDay = null; viewMonth = shiftMonth(viewMonth, viewMode === 'year' ? -12 : -1); render(); };
 $('#nextMonth').onclick = () => { selectedDay = null; viewMonth = shiftMonth(viewMonth, viewMode === 'year' ? 12 : 1); render(); };
@@ -2337,3 +2373,6 @@ if ('serviceWorker' in navigator && location.protocol !== 'file:') {
 }
 // 저장공간 영구화 요청 (브라우저가 임의로 지우지 않도록)
 if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
+
+// 스크롤하면 상단 바에 경계선
+addEventListener('scroll', () => document.querySelector('.topbar')?.classList.toggle('scrolled', scrollY > 8), { passive: true });
