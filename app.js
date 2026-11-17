@@ -258,6 +258,7 @@ function navAnim() {
 // 맨 위 금액: 0에서 올라가며 세기
 function countUp(el) {
   const to = Number(el.dataset.v); if (!isFinite(to) || !to) return;
+  el.textContent = won(0); // 최종값이 먼저 보였다가 다시 세지 않게
   const t0 = performance.now(), dur = 700;
   const step = t => { const p = Math.min(1, (t - t0) / dur), e = 1 - Math.pow(1 - p, 3);
     el.textContent = won(to * e); if (p < 1) requestAnimationFrame(step); };

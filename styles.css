@@ -589,3 +589,6 @@ body { word-break: keep-all; overflow-wrap: anywhere; }
 .guide-btns { margin-top: 2px; }
 table.mini td { line-height: 1.45; vertical-align: top; }
 .card h2 { line-height: 1.3; }
+
+/* 탭 전환 슬라이드 중 가로 스크롤이 생기지 않게 */
+html, body { overflow-x: clip; }
