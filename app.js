@@ -53,6 +53,7 @@ const defaultState = () => ({
   assets: [],  // 자산 {id, name, kind, balance, monthly, day, match, accruedTo, updated}
   bills: [],   // 공과금 {id, name, cat, day, rec:{'YYYY-MM': 금액}, paid:{'YYYY-MM': true}}
   funds: [],   // 비정기 지출 적립 {id, name, amount(1회), months:[1~12], start:'YYYY-MM', init, match, category}
+  pending: [], // 자동 수집 확인 대기 {id, type, amount, category, memo, date, src(알림 원문 앞부분)} → 사용자가 ✓ 하면 tx로
   settings: { emergency: 0, highDebt: false },
   merchantCats: {}, // 가맹점 → 사용자가 고른 카테고리 (문자 입력 시 학습)
 });
@@ -318,7 +319,7 @@ function renderHome() {
 
   view.innerHTML = `
     ${heroHtml('💰 이번 달 남은 돈', s)}
-
+    ${(state.pending || []).length ? `<button class="sms-cta" data-pending><span class="cat-ic" style="--c:var(--gold)">📥</span><span><b>확인 ${state.pending.length}</b></span><span class="chev">›</span></button>` : ''}
 
     ${guideHtml()}
     ${eokHtml()}
@@ -1023,8 +1024,9 @@ const TX_MARK = /승인|결제|사용|입금|출금|이체|취소|일시불|할�
 const looksLikeSentence = memo => { const m = String(memo || '').trim(); return /^\d+\s*[.)]\s/.test(m) || m.length > 22 || /[(（]\s*$/.test(m); };
 function ingest(texts) {
   // 알림 1건씩 해석해 결과를 '수집 기록'에 남긴다(안 들어온 이유를 폰에서 바로 확인하기 위해)
-  let added = 0, removed = 0, balUp = 0, ignored = 0;
+  let added = 0, removed = 0, balUp = 0, ignored = 0, waiting = 0;
   const log = [];
+  state.pending = state.pending || [];
   for (const raw of texts) {
     const text = String(raw || '').trim();
     if (!FIN_MARK.test(text)) { ignored++; log.push({ at: Date.now(), r: '무시', text: text.slice(0, 40) }); continue; } // 금융 알림 아님: 앞부분만
@@ -1034,21 +1036,75 @@ function ingest(texts) {
     const res = [];
     for (const it of items) {
       if (applyBalance(it)) { balUp++; res.push('잔액'); }
-      // 가맹점 자리에 문장이 들어오면(목록 번호로 시작, 너무 김) 결제 알림이 아닐 가능성이 큼 → 자동 등록 대신 확인 요청
-      if (it.on && it.type !== 'cancel' && looksLikeSentence(it.memo)) { res.push('확인 필요'); continue; }
-      if (!it.on) { res.push(it.dup ? '중복' : it.fixedHit ? '고정' : it.type === 'cancel' ? '취소 대상 없음' : '제외'); continue; }
-      if (it.type === 'cancel') { if (it.cancelTarget) { state.tx = state.tx.filter(t => t.id !== it.cancelTarget); removed++; res.push('취소'); } continue; }
+      // 승인취소: 저장된 원 거래는 삭제, 아직 확인 대기 중인 원 거래면 대기 목록에서 뺀다
+      if (it.type === 'cancel') {
+        if (it.cancelTarget) { state.tx = state.tx.filter(t => t.id !== it.cancelTarget); removed++; res.push('취소'); continue; }
+        const p = state.pending.find(x => x.type === 'expense' && x.amount === it.amount);
+        if (p) { state.pending = state.pending.filter(x => x !== p); removed++; res.push('취소'); } else res.push('취소 대상 없음');
+        continue;
+      }
+      if (!it.on) { res.push(it.dup ? '중복' : it.fixedHit ? '고정' : '제외'); continue; }
       if (it.billId && recordBill(it)) { added++; res.push('공과금'); continue; }
+      const memo = it.memo.trim();
+      if (state.pending.some(x => x.date === it.date && x.amount === it.amount && x.memo === memo)) { res.push('중복'); continue; }
+      // 바로 저장하지 않고 '📥 확인' 목록으로 — 결제 알림처럼 보이는 다른 알림(텔레그램 등)이 지출로 들어가는 것 방지
       const acct = detectAcct(it.raw || text);
-      state.tx.push({ id: uid(), type: it.type, amount: it.amount, category: it.category, memo: it.memo.trim(), date: it.date, auto: true, ...(it.fundId ? { fund: it.fundId } : {}), ...(acct ? { acct } : {}) });
-      added++; res.push('등록');
+      state.pending.push({ id: uid(), type: it.type, amount: it.amount, category: it.category, memo, date: it.date, auto: true, src: text.slice(0, 200),
+        ...(looksLikeSentence(memo) ? { odd: true } : {}), ...(it.fundId ? { fund: it.fundId } : {}), ...(acct ? { acct } : {}) });
+      waiting++; res.push('확인 대기');
     }
     log.push({ at: Date.now(), r: res.length ? [...new Set(res)].join('·') : '해석 실패', text: text.slice(0, 300) });
   }
   if (balUp) syncLinkedGoals();
   state.settings.ingestLog = [...log.reverse(), ...(state.settings.ingestLog || [])].slice(0, 40);
   save(); if (!sheet.open) render();
-  toast(`자동 ${added}건 등록${removed ? ` · 취소 ${removed}` : ''}${ignored ? ` · 무시 ${ignored}` : ''}`);
+  toast([waiting && `📥 확인 ${waiting}`, added && `공과금 ${added}`, removed && `취소 ${removed}`, ignored && `무시 ${ignored}`].filter(Boolean).join(' · ') || '📥 새 내역 없음');
+}
+// 📥 확인 대기: 자동 수집된 알림을 한 건씩 ✓ 저장 / ✕ 버리기. 카테고리는 저장 전에 고를 수 있다.
+function openPendingSheet() {
+  const draw = () => {
+    const list = [...(state.pending || [])].sort((a, b) => b.date.localeCompare(a.date));
+    if (!list.length) { sheet.close(); return; }
+    form.innerHTML = `<div class="row"><h2>📥 확인 ${list.length}</h2>${list.length > 1 ? '<button type="button" class="link-btn" data-pend-all>✓ 모두 저장</button>' : ''}</div>
+      ${list.map(p => { const cats = p.type === 'income' ? INCOME_CATS : EXPENSE_CATS; return `
+        <div class="sms-item" data-pend="${p.id}">
+          <div class="row"><div><div class="title">${esc(p.memo || '–')}${p.odd ? ' <span class="pill bad">⚠ 확인</span>' : ''}</div>
+            <div class="sub">${Number(p.date.slice(5, 7))}/${Number(p.date.slice(8))} · ${p.type === 'income' ? '💵 수입' : '💸 지출'}</div></div>
+            <b class="${p.type === 'income' ? 'income' : 'expense'}">${p.type === 'income' ? '+' : '−'}${won(p.amount)}</b></div>
+          ${p.src ? `<div class="ilog-text">${esc(p.src)}</div>` : ''}
+          <div class="row" style="gap:8px;margin-top:8px">
+            <select data-pend-cat>${cats.map(c => `<option${c === p.category ? ' selected' : ''}>${esc(c)}</option>`).join('')}</select>
+            <button type="button" class="btn sm ghost" data-pend-no>✕ 버리기</button>
+            <button type="button" class="btn sm" data-pend-ok>✓ 저장</button>
+          </div>
+        </div>`; }).join('')}
+      <div class="actions"><button type="button" class="btn ghost" data-act="close">닫기</button></div>`;
+  };
+  const accept = p => {
+    const { src, odd, ...t } = p;
+    state.tx.push(t);
+    if (t.memo && t.category !== '기타') { state.merchantCats = state.merchantCats || {}; state.merchantCats[t.memo] = t.category; }
+  };
+  form.onsubmit = e => e.preventDefault();
+  form.onchange = e => {
+    const s = e.target.closest('[data-pend-cat]'); if (!s) return;
+    const p = state.pending.find(x => x.id === s.closest('[data-pend]').dataset.pend); if (p) { p.category = s.value; save(); }
+  };
+  form.onclick = e => {
+    if (e.target.closest('[data-act=close]')) { sheet.close(); return; }
+    if (e.target.closest('[data-pend-all]')) {
+      const n = state.pending.length; state.pending.forEach(accept); state.pending = [];
+      save(); toast(`✓ ${n}건 저장`); sheet.close(); return;
+    }
+    const ok = e.target.closest('[data-pend-ok]'), no = e.target.closest('[data-pend-no]');
+    if (!ok && !no) return;
+    const id = (ok || no).closest('[data-pend]').dataset.pend, p = state.pending.find(x => x.id === id); if (!p) return;
+    if (ok) accept(p);
+    state.pending = state.pending.filter(x => x.id !== id);
+    save(); toast(ok ? '✓ 저장' : '✕ 버림'); draw();
+  };
+  sheet.addEventListener('close', () => { form.onclick = null; form.onchange = null; render(); }, { once: true });
+  draw(); sheet.showModal();
 }
 function ingestLogHtml() {
   const list = state.settings.ingestLog || [];
@@ -1056,7 +1112,7 @@ function ingestLogHtml() {
   const bad = list.filter(x => /실패|제외|대상 없음|확인 필요/.test(x.r)).length;
   const t = ms => { const d = new Date(ms); return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
   return `<details class="ilog"><summary>📥 기록 ${list.length}${bad ? ` · <b class="expense">실패 ${bad}</b>` : ''}</summary>
-    <ul class="list">${list.map((x, i) => `<li><div><div class="sub">${t(x.at)} <span class="pill ${x.r.includes('등록') || x.r === '공과금' || x.r === '취소' ? 'ok' : /실패|제외|대상 없음|확인 필요/.test(x.r) ? 'bad' : ''}">${esc(x.r)}</span></div>
+    <ul class="list">${list.map((x, i) => `<li><div><div class="sub">${t(x.at)} <span class="pill ${x.r.includes('등록') || x.r.includes('확인 대기') || x.r === '공과금' || x.r === '취소' ? 'ok' : /실패|제외|대상 없음|확인 필요/.test(x.r) ? 'bad' : ''}">${esc(x.r)}</span></div>
       <div class="ilog-text">${esc(x.text)}</div></div>${x.r !== '무시' ? `<button class="link-btn" data-ilog="${i}">✉</button>` : ''}</li>`).join('')}</ul>
     <button class="link-btn" data-ilog-clear>지우기</button></details>`;
 }
@@ -2232,7 +2288,7 @@ $('#monthLabel').onclick = () => openPicker();
 $('#fab').onclick = () => openTxSheet();
 
 view.addEventListener('click', e => {
-  const el = e.target.closest('[data-guide-done],[data-guide-act],[data-profile],[data-biz-goal],[data-theme-set],[data-cat-detail],[data-src],[data-acct],[data-add-acct],[data-ilog],[data-ilog-clear],[data-fund],[data-add-fund],[data-recur],[data-inst-end],[data-budget],[data-classify],[data-del-cat],#addCatBtn,[data-asset],[data-add-asset],[data-month-sum],[data-bill-import],[data-bill-paid],[data-bill],[data-add-bill],[data-bill-migrate],[data-open-month],[data-import-fixed],[data-clear-ended],[data-sms],[data-day],[data-clear-day],[data-edit-tx],[data-edit-fixed],[data-add-fixed],[data-edit-goal],[data-add-goal],[data-goto],#exportBtn,#importBtn,#resetBtn,#updateBtn,#loginBtn,#logoutBtn,#syncBtn,#dropBtn,#coachBtn,[data-copy]');
+  const el = e.target.closest('[data-guide-done],[data-guide-act],[data-profile],[data-biz-goal],[data-theme-set],[data-cat-detail],[data-src],[data-acct],[data-add-acct],[data-ilog],[data-ilog-clear],[data-fund],[data-add-fund],[data-recur],[data-inst-end],[data-budget],[data-classify],[data-pending],[data-del-cat],#addCatBtn,[data-asset],[data-add-asset],[data-month-sum],[data-bill-import],[data-bill-paid],[data-bill],[data-add-bill],[data-bill-migrate],[data-open-month],[data-import-fixed],[data-clear-ended],[data-sms],[data-day],[data-clear-day],[data-edit-tx],[data-edit-fixed],[data-add-fixed],[data-edit-goal],[data-add-goal],[data-goto],#exportBtn,#importBtn,#resetBtn,#updateBtn,#loginBtn,#logoutBtn,#syncBtn,#dropBtn,#coachBtn,[data-copy]');
   if (!el) return;
   if (el.dataset.guideDone) { state.settings.guideDone = { ...(state.settings.guideDone || {}), [el.dataset.guideDone]: todayStr() }; save(); render(); toast('✓ 30일 뒤 다시 확인'); }
   else if (el.dataset.guideAct) { const a = el.dataset.guideAct; if (a === 'profile') openProfileSheet(); else if (a === 'budget') openBudgetSheet(); else if (a === 'classify') openClassifySheet(); else { currentTab = a; render(); window.scrollTo(0, 0); } }
@@ -2244,6 +2300,7 @@ view.addEventListener('click', e => {
   else if (el.dataset.acct) openAcctSheet(accounts().find(a => a.id === el.dataset.acct));
   else if ('addAcct' in el.dataset) openAcctSheet();
   else if (el.dataset.ilog) { const x = (state.settings.ingestLog || [])[Number(el.dataset.ilog)]; if (x) openSmsSheet(x.text); }
+  else if ('pending' in el.dataset) openPendingSheet();
   else if ('ilogClear' in el.dataset) { state.settings.ingestLog = []; save(); render(); }
   else if (el.dataset.fund) openFundSheet(state.funds.find(f => f.id === el.dataset.fund));
   else if ('addFund' in el.dataset) openFundSheet();
