@@ -1047,6 +1047,7 @@ function ingest(texts) {
       if (it.billId && recordBill(it)) { added++; res.push('공과금'); continue; }
       const memo = it.memo.trim();
       if (state.pending.some(x => x.date === it.date && x.amount === it.amount && x.memo === memo)) { res.push('중복'); continue; }
+      if ((state.settings.pendNo || []).includes(pendKey({ date: it.date, amount: it.amount, memo }))) { res.push('버린 내역'); continue; }
       // 바로 저장하지 않고 '📥 확인' 목록으로 — 결제 알림처럼 보이는 다른 알림(텔레그램 등)이 지출로 들어가는 것 방지
       const acct = detectAcct(it.raw || text);
       state.pending.push({ id: uid(), type: it.type, amount: it.amount, category: it.category, memo, date: it.date, auto: true, src: text.slice(0, 200),
@@ -1061,10 +1062,11 @@ function ingest(texts) {
   toast([waiting && `📥 확인 ${waiting}`, added && `공과금 ${added}`, removed && `취소 ${removed}`, ignored && `무시 ${ignored}`].filter(Boolean).join(' · ') || '📥 새 내역 없음');
 }
 // 📥 확인 대기: 자동 수집된 알림을 한 건씩 ✓ 저장 / ✕ 버리기. 카테고리는 저장 전에 고를 수 있다.
+const pendKey = p => `${p.date}|${p.amount}|${p.memo}`;
 function openPendingSheet() {
   const draw = () => {
     const list = [...(state.pending || [])].sort((a, b) => b.date.localeCompare(a.date));
-    if (!list.length) { sheet.close(); return; }
+    if (!list.length) { sheet.close(); render(); return; }
     form.innerHTML = `<div class="row"><h2>📥 확인 ${list.length}</h2>${list.length > 1 ? '<button type="button" class="link-btn" data-pend-all>✓ 모두 저장</button>' : ''}</div>
       ${list.map(p => { const cats = p.type === 'income' ? INCOME_CATS : EXPENSE_CATS; return `
         <div class="sms-item" data-pend="${p.id}">
@@ -1099,7 +1101,7 @@ function openPendingSheet() {
     const ok = e.target.closest('[data-pend-ok]'), no = e.target.closest('[data-pend-no]');
     if (!ok && !no) return;
     const id = (ok || no).closest('[data-pend]').dataset.pend, p = state.pending.find(x => x.id === id); if (!p) return;
-    if (ok) accept(p);
+    if (ok) accept(p); else state.settings.pendNo = [pendKey(p), ...(state.settings.pendNo || [])].slice(0, 60); // 같은 알림이 다시 와도 안 살아나게
     state.pending = state.pending.filter(x => x.id !== id);
     save(); toast(ok ? '✓ 저장' : '✕ 버림'); draw();
   };
